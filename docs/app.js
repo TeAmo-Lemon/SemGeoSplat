@@ -1,7 +1,7 @@
 'use strict';
 
 const $ = (id) => document.getElementById(id);
-const featuredIds = ['truck-133', 'garden-77', 'bonsai-87', 'flower-19'];
+const featuredIds = ['orchids-3', 'garden-35', 'counter-9'];
 const names = { bonsai: 'Bonsai', counter: 'Counter', flower: 'Flower', garden: 'Garden', horns: 'Horns', ignatius: 'Ignatius', kitchen: 'Kitchen', m60: 'M60', orchids: 'Orchids', train: 'Train', trex: 'T-Rex', truck: 'Truck' };
 const paths = {
   video: (item) => `assets/results/${item.id}/semgeo.mp4`,
@@ -12,7 +12,7 @@ const paths = {
 };
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 const canPreview = window.matchMedia('(hover: hover) and (pointer: fine)');
-const state = { items: [], filtered: [], scene: 'all', limit: 12, featured: null, viewerItems: [], viewerIndex: 0, heroWanted: !reducedMotion.matches && !navigator.connection?.saveData, heroVisible: true };
+const state = { items: [], featured: null, viewerItems: [], viewerIndex: 0, heroWanted: !reducedMotion.matches && !navigator.connection?.saveData, heroVisible: true };
 const hero = $('hero-video');
 const dialog = $('result-dialog');
 let activePreview = null;
@@ -121,49 +121,14 @@ function makeCard(item) {
   button.addEventListener('pointerleave', () => { if (activePreview === video) stopPreview(); });
   button.addEventListener('focus', preview);
   button.addEventListener('blur', () => { if (activePreview === video) stopPreview(); });
-  button.addEventListener('click', () => openViewer(item, state.filtered, button));
+  button.addEventListener('click', () => openViewer(item, state.items, button));
   return article;
 }
-function renderCards(append = false) {
-  const grid = $('results-grid');
-  const start = append ? grid.children.length : 0;
-  if (!append) { stopPreview(); grid.replaceChildren(); }
-  const fragment = document.createDocumentFragment();
-  for (const item of state.filtered.slice(start, state.limit)) fragment.append(makeCard(item));
-  grid.append(fragment);
-  $('empty-state').hidden = state.filtered.length > 0;
-  $('load-more').hidden = state.limit >= state.filtered.length;
-  const visible = Math.min(state.limit, state.filtered.length);
-  $('filter-status').textContent = `${state.filtered.length} result${state.filtered.length === 1 ? '' : 's'}${state.scene === 'all' ? ' across all scenes' : ' · ' + names[state.scene]} · Select a result to explore`;
-  $('shown-count').textContent = state.filtered.length ? `Showing ${visible} of ${state.filtered.length}` : '';
+function renderCards() {
+  stopPreview();
+  $('results-grid').replaceChildren(...state.items.map(makeCard));
+  $('gallery-status').textContent = 'A selection of six scenes and six distinct styles. Select any result to explore it in motion.';
 }
-function filterResults() {
-  const query = $('search').value.trim().toLowerCase();
-  const style = $('style-filter').value;
-  state.filtered = state.items.filter((item) =>
-    (state.scene === 'all' || item.scene === state.scene) &&
-    (style === 'all' || item.styleId === style) &&
-    (!query || `${item.scene} ${names[item.scene]} ${item.sceneLabel} style ${item.styleId} ${item.id}`.toLowerCase().includes(query))
-  );
-  state.limit = 12;
-  renderCards();
-}
-function resetFilters() {
-  state.scene = 'all';
-  $('search').value = '';
-  $('style-filter').value = 'all';
-  for (const button of $('scene-filters').children) button.setAttribute('aria-pressed', String(button.dataset.scene === 'all'));
-  filterResults();
-}
-$('search').addEventListener('input', filterResults);
-$('style-filter').addEventListener('change', filterResults);
-$('reset-filters').addEventListener('click', resetFilters);
-$('load-more').addEventListener('click', () => {
-  const firstNew = $('results-grid').children.length;
-  state.limit += 12;
-  renderCards(true);
-  $('results-grid').children[firstNew]?.querySelector('button').focus({ preventScroll: true });
-});
 
 function renderViewer() {
   const item = state.viewerItems[state.viewerIndex];
@@ -229,31 +194,10 @@ async function init() {
   const items = await response.json();
   const scenes = [...new Set(items.map((item) => item.scene))];
   const styles = [...new Set(items.map((item) => item.styleId))].sort((a, b) => Number(a) - Number(b));
-  // Lead with one example per scene before showing the remaining collection.
+  // Keep the curated presentation order from the manifest.
+  state.items = items;
   const featured = featuredIds.map((id) => items.find((item) => item.id === id)).filter(Boolean);
-  const leads = scenes.map((scene) => featured.find((item) => item.scene === scene) || items.find((item) => item.scene === scene));
-  const leadingIds = new Set(leads.map((item) => item.id));
-  state.items = [...leads, ...items.filter((item) => !leadingIds.has(item.id))];
-  $('collection-stats').textContent = `${scenes.length} scenes · ${styles.length} styles · ${items.length} results`;
-  for (const scene of ['all', ...scenes]) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.dataset.scene = scene;
-    button.textContent = scene === 'all' ? 'All scenes' : names[scene];
-    button.setAttribute('aria-pressed', String(scene === 'all'));
-    button.addEventListener('click', () => {
-      state.scene = scene;
-      for (const other of $('scene-filters').children) other.setAttribute('aria-pressed', String(other === button));
-      filterResults();
-    });
-    $('scene-filters').append(button);
-  }
-  for (const style of styles) {
-    const option = document.createElement('option');
-    option.value = style;
-    option.textContent = `Style ${style}`;
-    $('style-filter').append(option);
-  }
+  $('collection-stats').textContent = `${items.length} selected results · ${scenes.length} scenes · ${styles.length} styles`;
   for (const [index, item] of featured.entries()) {
     const button = document.createElement('button');
     button.type = 'button';
@@ -263,9 +207,9 @@ async function init() {
     $('featured-options').append(button);
   }
   selectFeatured(featured[0] || items[0]);
-  filterResults();
+  renderCards();
 }
 init().catch((error) => {
   console.error(error);
-  $('filter-status').textContent = 'The collection could not load. Please refresh the page to try again.';
+  $('gallery-status').textContent = 'The collection could not load. Please refresh the page to try again.';
 });

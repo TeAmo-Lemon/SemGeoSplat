@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f7f6f2">
   <title>SemGeoSplat — 3D Scene Stylization</title>
-  <meta name="description" content="Explore SemGeoSplat's 3D scene stylization results: 174 renderings across 12 scenes, with original views and style references.">
+  <meta name="description" content="Explore SemGeoSplat's 3D scene stylization results: six selected results across six scenes, with original views and style references.">
   <meta property="og:title" content="SemGeoSplat — 3D Scene Stylization">
   <meta property="og:description" content="One scene, many artistic possibilities. Explore the SemGeo visual results gallery.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://TeAmo-Lemon.github.io/SemGeoSplat/">
-  <meta property="og:image" content="https://TeAmo-Lemon.github.io/SemGeoSplat/assets/posters/truck-133.jpg">
+  <meta property="og:image" content="https://TeAmo-Lemon.github.io/SemGeoSplat/assets/posters/orchids-3.jpg">
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
   <script src="app.js" defer></script>
@@ -24,34 +24,29 @@
   <main>
     <section class="intro wrap" aria-labelledby="title">
       <div class="eyebrow"><span class="live-dot"></span>3D GAUSSIAN SPLATTING <span class="eyebrow-divider">/</span> VISUAL RESULTS</div>
-      <div class="intro-row"><h1 id="title">A scene.<br><em>Many expressions.</em></h1><div class="intro-note"><p>3D scene stylization<br>with <strong>SemGeoSplat.</strong></p><p class="muted">Explore new perspectives on familiar scenes through a collection of artistic styles.</p><a class="text-link" href="#gallery">Explore the collection <span>↓</span></a></div></div>
+      <div class="intro-row"><h1 id="title">A scene.<br><em>Many expressions.</em></h1><div class="intro-note"><p>3D scene stylization<br>with <strong>SemGeoSplat.</strong></p><p class="muted">Explore new perspectives on familiar scenes through a collection of artistic styles.</p><a class="text-link" href="#gallery">View selected results <span>↓</span></a></div></div>
     </section>
     <section class="showcase wrap" aria-label="Featured result">
       <div class="showcase-grid">
         <div class="feature-main media-surface">
-          <video id="hero-video" muted loop playsinline preload="metadata" poster="assets/posters/truck-133.jpg" aria-label="SemGeo result: Truck, style 133"><source src="assets/results/truck-133/semgeo.mp4" type="video/mp4"></video>
+          <video id="hero-video" muted loop playsinline preload="metadata" poster="assets/posters/orchids-3.jpg" aria-label="SemGeo result: Orchids, style 3"><source src="assets/results/orchids-3/semgeo.mp4" type="video/mp4"></video>
           <div class="media-label"><span class="live-dot"></span> SEMGEO RESULT</div>
-          <div class="feature-bottom"><span id="hero-caption">Truck <span>/ Style 133</span></span><button id="hero-toggle" class="glass-button" type="button" aria-label="Play featured animation">Play ↗</button><button id="hero-expand" class="glass-button" type="button" aria-label="Open featured result in detail">Expand ⤢</button></div>
+          <div class="feature-bottom"><span id="hero-caption">Orchids <span>/ Style 3</span></span><button id="hero-toggle" class="glass-button" type="button" aria-label="Play featured animation">Play ↗</button><button id="hero-expand" class="glass-button" type="button" aria-label="Open featured result in detail">Expand ⤢</button></div>
         </div>
         <div class="feature-context">
-          <figure class="context-frame original-frame"><img id="hero-original" src="assets/posters/truck-original.jpg" alt="Original Truck scene" width="960" height="720"><figcaption><span>01</span> Original scene</figcaption></figure>
-          <figure class="context-frame style-frame"><img id="hero-style" src="assets/styles/133.jpg" alt="Style reference 133"><figcaption><span>02</span> Style reference <span id="hero-style-id">133</span></figcaption></figure>
+          <figure class="context-frame original-frame"><img id="hero-original" src="assets/posters/orchids-original.jpg" alt="Original Orchids scene" width="960" height="720"><figcaption><span>01</span> Original scene</figcaption></figure>
+          <figure class="context-frame style-frame"><img id="hero-style" src="assets/styles/3.jpg" alt="Style reference 3"><figcaption><span>02</span> Style reference <span id="hero-style-id">3</span></figcaption></figure>
         </div>
       </div>
       <div class="showcase-footer"><p>One scene, many artistic possibilities.</p><div id="featured-options" class="featured-options" aria-label="Choose a featured result"></div></div>
     </section>
     <section class="collection wrap" id="gallery" aria-labelledby="gallery-title">
-      <div class="section-top"><div><p class="eyebrow">THE COLLECTION</p><h2 id="gallery-title">Explore the results<span class="blue">.</span></h2></div><p class="collection-stats" id="collection-stats">12 scenes <span>·</span> 51 styles <span>·</span> 174 results</p></div>
-      <div class="gallery-controls">
-        <div class="scene-filters" id="scene-filters" role="group" aria-label="Filter by scene"></div>
-        <div class="search-row"><p class="filter-status" id="filter-status" aria-live="polite">Loading the collection…</p><div class="search-fields"><label class="search-label"><span aria-hidden="true">⌕</span><input type="search" id="search" placeholder="Search scenes or styles" aria-label="Search scenes or styles"></label><label class="select-label"><span class="sr-only">Filter by style</span><select id="style-filter"><option value="all">All styles</option></select></label></div></div>
-      </div>
+      <div class="section-top"><div><p class="eyebrow">SELECTED WORK</p><h2 id="gallery-title">Selected results<span class="blue">.</span></h2></div><p class="collection-stats" id="collection-stats">6 selected results <span>·</span> 6 scenes <span>·</span> 6 styles</p></div>
+      <p class="gallery-intro" id="gallery-status" aria-live="polite">A selection of six scenes and six distinct styles. Select any result to explore it in motion.</p>
       <div class="results-grid" id="results-grid"></div>
-      <div class="empty-state" id="empty-state" hidden><h3>No results found.</h3><p>Try another scene, style, or search term.</p><button class="outline-button" id="reset-filters" type="button">Reset filters</button></div>
-      <div class="gallery-bottom"><button class="outline-button" id="load-more" type="button" hidden>Show more results <span>↓</span></button><span id="shown-count"></span></div>
-      <noscript><p>Enable JavaScript to filter and browse all results. You can also <a href="assets/results/truck-133/semgeo.mp4">watch a featured SemGeo animation</a> or <a href="https://github.com/TeAmo-Lemon/SemGeoSplat/tree/main/docs/assets/results">browse the result files on GitHub</a>.</p></noscript>
+      <noscript><p>Enable JavaScript to explore the selected results. You can also <a href="assets/results/orchids-3/semgeo.mp4">watch a featured SemGeo animation</a>.</p></noscript>
     </section>
-    <section class="project-section" id="project"><div class="wrap project-inner"><div><p class="eyebrow">THE PROJECT</p><h2>SemGeoSplat</h2><p class="project-subtitle">3D scene stylization, in motion.</p></div><div class="project-description"><p>This gallery presents SemGeo results alongside their original scenes and style references. Select any result to explore the animation in detail.</p><p>The source code is being prepared for release. Follow the repository for code and project updates.</p><a class="dark-button" href="https://github.com/TeAmo-Lemon/SemGeoSplat" target="_blank" rel="noopener">View project on GitHub <span>↗</span></a></div></div></section>
+    <section class="project-section" id="project"><div class="wrap project-inner"><div><p class="eyebrow">THE PROJECT</p><h2>SemGeoSplat</h2><p class="project-subtitle">3D scene stylization, in motion.</p></div><div class="project-description"><p>Six selected SemGeo results, each paired with its original scene and style reference. Select any result to explore the animation in detail.</p><p>The source code is being prepared for release. Follow the repository for code and project updates.</p><a class="dark-button" href="https://github.com/TeAmo-Lemon/SemGeoSplat" target="_blank" rel="noopener">View project on GitHub <span>↗</span></a></div></div></section>
   </main>
   <footer class="wrap site-footer"><a class="brand" href="./">SemGeoSplat<span class="blue">.</span></a><p>Scenes reimagined. Perspectives preserved.</p><a href="#title">Back to top ↑</a></footer>
   <dialog id="result-dialog" aria-labelledby="dialog-title">
