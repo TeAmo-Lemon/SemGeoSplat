@@ -1,0 +1,14 @@
+name: semgeo
+channels:
+  - conda-forge
+  - nvidia
+dependencies:
+  - python=3.10
+  - pip
+  - cuda-version=12.4
+  - cuda-nvcc=12.4.131
+  - cuda-cudart-dev=12.4.127
+  - cuda-cccl=12.4.127
+  - eigen
+  - pip:
+      - -r requirements.txt

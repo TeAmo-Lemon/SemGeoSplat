@@ -1,0 +1,62 @@
+{
+  "garden": {
+    "region_w_feat": 1.8
+  },
+  "bicycle": {
+    "region_merge_max_cost": 0.3
+  },
+  "bonsai": {
+    "region_merge_max_cost": 0.3
+  },
+  "stump": {
+    "region_merge_max_cost": 0.2
+  },
+  "kitchen": {
+    "region_merge_max_cost": 0.5
+  },
+  "counter": {
+    "style_primitive_k": 6,
+    "region_merge_max_cost": 0.5,
+    "fgw_alpha": 0.7
+  },
+  "fern": {
+    "region_merge_max_cost": 0.5,
+    "region_overseg_geo_only": 1,
+    "fgw_alpha": 0.3
+  },
+  "flower": {
+    "region_merge_max_cost": 0.4
+  },
+  "trex": {
+    "style_primitive_k": 10
+  },
+  "fortress": {
+    "region_merge_max_cost": 0.3
+  },
+  "horns": {
+    "region_merge_max_cost": 0.5
+  },
+  "orchids": {
+    "region_merge_max_cost": 0.3
+  },
+  "train": {
+    "region_merge_max_cost": 0.5
+  },
+  "truck": {
+    "region_merge_max_cost": 0.3
+  },
+  "Ignatius": {
+    "region_merge_max_cost": 0.3
+  },
+  "Barn": {
+    "region_merge_max_cost": 0.3
+  },
+  "M60": {
+    "style_primitive_k": 10,
+    "region_merge_max_cost": 0.3
+  },
+  "Horse": {
+    "style_primitive_k": 10,
+    "region_merge_max_cost": 0.3
+  }
+}
