@@ -34,5 +34,41 @@
     "scene": "bonsai",
     "sceneLabel": "盆栽",
     "styleId": "2"
+  },
+  {
+    "id": "flower-76",
+    "scene": "flower",
+    "sceneLabel": "花朵",
+    "styleId": "76"
+  },
+  {
+    "id": "train-138",
+    "scene": "train",
+    "sceneLabel": "火车",
+    "styleId": "138"
+  },
+  {
+    "id": "kitchen-120",
+    "scene": "kitchen",
+    "sceneLabel": "厨房",
+    "styleId": "120"
+  },
+  {
+    "id": "horns-12",
+    "scene": "horns",
+    "sceneLabel": "角雕塑",
+    "styleId": "12"
+  },
+  {
+    "id": "garden-121",
+    "scene": "garden",
+    "sceneLabel": "花园",
+    "styleId": "121"
+  },
+  {
+    "id": "orchids-87",
+    "scene": "orchids",
+    "sceneLabel": "兰花",
+    "styleId": "87"
   }
 ]

@@ -127,7 +127,7 @@ function makeCard(item) {
 function renderCards() {
   stopPreview();
   $('results-grid').replaceChildren(...state.items.map(makeCard));
-  $('gallery-status').textContent = 'A selection of six scenes and six distinct styles. Select any result to explore it in motion.';
+  $('gallery-status').textContent = 'A curated collection of expressive scenes and distinctive styles. Select any result to explore it in motion.';
 }
 
 function renderViewer() {
