@@ -6,69 +6,68 @@
   <meta name="description" content="SemGeoSplat. Scene stylization, regional texture controls, and novel views rendered from 3D Gaussians.">
   <title>SemGeoSplat · Controllable 3D Gaussian stylization</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="site.css">
-  <script defer src="site.js"></script>
+  <link rel="stylesheet" href="site.css?v=gallery2">
+  <script defer src="site.js?v=gallery2"></script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to results</a>
   <header><nav class="wrap" aria-label="Project navigation">
     <a class="wordmark" href="#main">SemGeoSplat</a>
-    <div class="navlinks"><a href="#scenes">Scenes</a><a href="#controls">FGW controls</a><a href="#orbit">Object orbit</a><a href="https://github.com/TeAmo-Lemon/SemGeoSplat">Code</a></div>
+    <div class="navlinks"><a href="#orbit">Kitchen orbit</a><a href="#scenes">Scenes</a><a href="#controls">FGW controls</a><a href="https://github.com/TeAmo-Lemon/SemGeoSplat">Code</a></div>
   </nav></header>
   <main class="wrap" id="main">
     <div class="masthead">
       <h1>SemGeoSplat</h1>
       <p class="subtitle">Controllable 3D Gaussian stylization with semantic regions and fused Gromov–Wasserstein transport</p>
     </div>
+    <section id="orbit" aria-labelledby="orbit-title">
+      <div class="section-head"><h2 id="orbit-title">Kitchen · LEGO brick stylization</h2><button type="button" class="motion" hidden>Pause motion</button></div>
+      <p class="section-description">The same loader turns through 360° in both views. Reference 133 transfers the colors and stud pattern of LEGO bricks onto the bucket, cab and tracks.</p>
+      <div class="scene-grid orbit-grid">
+        <figure><a class="media-box" href="media/kitchen-orbit.gif" aria-label="Open animation: The yellow toy loader rotating on white"><img src="media/kitchen-orbit.jpg" data-poster="media/kitchen-orbit.jpg" data-animation="media/kitchen-orbit.gif" loading="lazy" decoding="async" alt="The yellow toy loader rotating on white"></a><figcaption>Original loader</figcaption></figure>
+        <figure class="reference"><a class="media-box" href="media/kitchen-orbit-reference.jpg?ref=133"><img src="media/kitchen-orbit-reference.jpg?ref=133" loading="lazy" alt="Reference 133, a close-up of multicolored LEGO bricks"></a><figcaption>LEGO bricks · Reference 133</figcaption></figure>
+        <figure><a class="media-box" href="media/kitchen-orbit-stylized.gif?ref=133" aria-label="Open animation: The toy loader with colorful LEGO brick texture rotating on white"><img src="media/kitchen-orbit-stylized.jpg?ref=133" data-poster="media/kitchen-orbit-stylized.jpg?ref=133" data-animation="media/kitchen-orbit-stylized.gif?ref=133" loading="lazy" decoding="async" alt="The toy loader with colorful LEGO brick texture rotating on white"></a><figcaption>Stylized loader</figcaption></figure>
+      </div>
+    </section>
     <section id="scenes" aria-labelledby="scenes-title">
       <div class="section-head"><h2 id="scenes-title">Scene stylization</h2><button type="button" class="motion" hidden>Pause motion</button></div>
-      <div class="tabs" role="tablist" aria-label="Choose a scene" hidden>
-        <button type="button" role="tab" id="tab-kitchen" aria-controls="scene-kitchen" aria-selected="true">Kitchen</button>
-        <button type="button" role="tab" id="tab-bonsai" aria-controls="scene-bonsai" aria-selected="false">Bonsai</button>
-        <button type="button" role="tab" id="tab-flower" aria-controls="scene-flower" aria-selected="false">Flower</button>
-        <button type="button" role="tab" id="tab-garden" aria-controls="scene-garden" aria-selected="false">Garden</button>
-        <button type="button" role="tab" id="tab-horns" aria-controls="scene-horns" aria-selected="false">Horns</button>
+      <div class="scene-picker" hidden>
+        <label for="scene-choice">Scene</label>
+        <select id="scene-choice">
+            <option value="orchids" data-styles="2 3 10 11 25 54 87 121 133" data-default="3" data-dataset="LLFF">Orchids</option>
+            <option value="garden" data-styles="3 5 7 12 14 16 19 24 25 31 32 35 39 48 50 54 59 76 77 87 89 119 121 135 138" data-default="35" data-dataset="Mip-NeRF 360" data-gif-style="32">Garden</option>
+            <option value="counter" data-styles="2 3 6 8 9 12 13 16 19 24 25 30 32 35 54 57 63 64 77 79 87 88 94 111 120 135 138" data-default="9" data-dataset="Mip-NeRF 360">Counter</option>
+            <option value="truck" data-styles="8 9 12 16 19 24 30 63 77 88 94 99 122 133 135 138" data-default="133" data-dataset="Tanks and Temples">Truck</option>
+            <option value="trex" data-styles="2 8 12 16 19 24 25 30 32 77 94 99 121 135" data-default="121" data-dataset="LLFF">T-Rex</option>
+            <option value="bonsai" data-styles="2 11 54 87 120 121 132" data-default="2" data-dataset="Mip-NeRF 360" data-gif-style="11">Bonsai</option>
+            <option value="flower" data-styles="2 3 6 8 9 12 16 19 24 25 30 63 64 76 77 79 114 121 123 128 133 137 138 140" data-default="76" data-dataset="LLFF" data-gif-style="137">Flower</option>
+            <option value="train" data-styles="8 11 12 16 32 77 99 111 135 138" data-default="138" data-dataset="Tanks and Temples">Train</option>
+            <option value="kitchen" data-styles="2 12 16 19 24 30 32 64 120 121 132 133 135 138" data-default="133" data-dataset="Mip-NeRF 360" data-gif-style="16">Kitchen</option>
+            <option value="horns" data-styles="2 12 16 19 24 30 32 64 120 121 132 133 135 138" data-default="12" data-dataset="LLFF" data-gif-style="64">Horns</option>
+            <option value="ignatius" data-styles="2 3 25 120 121 130 132 133" data-default="120" data-dataset="Tanks and Temples">Ignatius</option>
+            <option value="m60" data-styles="2 3 11 14 25 50" data-default="25" data-dataset="Tanks and Temples">M60</option>
+        </select>
+        <span id="dataset">LLFF</span>
       </div>
-      <div class="scene-panel" role="tabpanel" tabindex="0" id="scene-kitchen" aria-labelledby="tab-kitchen">
-        <div class="scene-grid">
-          <figure><a class="media-box" href="media/kitchen-original.gif" aria-label="Open animation: Kitchen scene before stylization"><img src="media/kitchen-original.jpg" data-poster="media/kitchen-original.jpg" data-animation="media/kitchen-original.gif" loading="eager" decoding="async" alt="Kitchen scene before stylization"></a><figcaption>Original scene</figcaption></figure>
-          <figure class="reference"><a class="media-box" href="media/kitchen-scene-reference.jpg"><img loading="lazy" src="media/kitchen-scene-reference.jpg" alt="Style reference 16 for Kitchen"></a><figcaption>Reference 16</figcaption></figure>
-          <figure><a class="media-box" href="media/kitchen-scene.gif" aria-label="Open animation: Kitchen rendered with style 16"><img src="media/kitchen-scene.jpg" data-poster="media/kitchen-scene.jpg" data-animation="media/kitchen-scene.gif" loading="eager" decoding="async" alt="Kitchen rendered with style 16"></a><figcaption>Stylized scene</figcaption></figure>
-        </div>
-        <p class="meta"><strong>Kitchen</strong><span>Mip-NeRF 360</span></p>
+      <div id="comparison" class="scene-grid">
+        <figure>
+          <video class="scene-video" id="original-video" poster="media/gallery/orchids/original.jpg" src="media/gallery/orchids/original.mp4" muted loop playsinline controls preload="none" aria-label="Original Orchids scene"></video>
+          <figcaption>Original scene <a id="original-link" href="media/gallery/orchids/original.mp4">Open clip</a></figcaption>
+        </figure>
+        <figure class="reference">
+          <a class="media-box" id="reference-link" href="media/gallery/styles/3.jpg"><img id="reference-image" src="media/gallery/styles/3.jpg" alt="Style reference 3"></a>
+          <figcaption id="reference-label">Reference 3</figcaption>
+        </figure>
+        <figure>
+          <video class="scene-video" id="styled-video" poster="media/gallery/orchids/3.jpg" src="media/gallery/orchids/3.mp4" muted loop playsinline controls preload="none" aria-label="Orchids rendered with reference 3"></video>
+          <figcaption>Stylized scene <a id="styled-link" href="media/gallery/orchids/3.mp4">Open clip</a></figcaption>
+        </figure>
       </div>
-      <div class="scene-panel" role="tabpanel" tabindex="0" id="scene-bonsai" aria-labelledby="tab-bonsai">
-        <div class="scene-grid">
-          <figure><a class="media-box" href="media/bonsai-original.gif" aria-label="Open animation: Bonsai scene before stylization"><img src="media/bonsai-original.jpg" data-poster="media/bonsai-original.jpg" data-animation="media/bonsai-original.gif" loading="lazy" decoding="async" alt="Bonsai scene before stylization"></a><figcaption>Original scene</figcaption></figure>
-          <figure class="reference"><a class="media-box" href="media/bonsai-scene-reference.jpg"><img loading="lazy" src="media/bonsai-scene-reference.jpg" alt="Style reference 11 for Bonsai"></a><figcaption>Reference 11</figcaption></figure>
-          <figure><a class="media-box" href="media/bonsai-scene.gif" aria-label="Open animation: Bonsai rendered with style 11"><img src="media/bonsai-scene.jpg" data-poster="media/bonsai-scene.jpg" data-animation="media/bonsai-scene.gif" loading="lazy" decoding="async" alt="Bonsai rendered with style 11"></a><figcaption>Stylized scene</figcaption></figure>
-        </div>
-        <p class="meta"><strong>Bonsai</strong><span>Mip-NeRF 360</span></p>
-      </div>
-      <div class="scene-panel" role="tabpanel" tabindex="0" id="scene-flower" aria-labelledby="tab-flower">
-        <div class="scene-grid">
-          <figure><a class="media-box" href="media/flower-original.gif" aria-label="Open animation: Flower scene before stylization"><img src="media/flower-original.jpg" data-poster="media/flower-original.jpg" data-animation="media/flower-original.gif" loading="lazy" decoding="async" alt="Flower scene before stylization"></a><figcaption>Original scene</figcaption></figure>
-          <figure class="reference"><a class="media-box" href="media/flower-scene-reference.jpg"><img loading="lazy" src="media/flower-scene-reference.jpg" alt="Style reference 137 for Flower"></a><figcaption>Reference 137</figcaption></figure>
-          <figure><a class="media-box" href="media/flower-scene.gif" aria-label="Open animation: Flower rendered with style 137"><img src="media/flower-scene.jpg" data-poster="media/flower-scene.jpg" data-animation="media/flower-scene.gif" loading="lazy" decoding="async" alt="Flower rendered with style 137"></a><figcaption>Stylized scene</figcaption></figure>
-        </div>
-        <p class="meta"><strong>Flower</strong><span>LLFF</span></p>
-      </div>
-      <div class="scene-panel" role="tabpanel" tabindex="0" id="scene-garden" aria-labelledby="tab-garden">
-        <div class="scene-grid">
-          <figure><a class="media-box" href="media/garden-original.gif" aria-label="Open animation: Garden scene before stylization"><img src="media/garden-original.jpg" data-poster="media/garden-original.jpg" data-animation="media/garden-original.gif" loading="lazy" decoding="async" alt="Garden scene before stylization"></a><figcaption>Original scene</figcaption></figure>
-          <figure class="reference"><a class="media-box" href="media/garden-scene-reference.jpg"><img loading="lazy" src="media/garden-scene-reference.jpg" alt="Style reference 32 for Garden"></a><figcaption>Reference 32</figcaption></figure>
-          <figure><a class="media-box" href="media/garden-scene.gif" aria-label="Open animation: Garden rendered with style 32"><img src="media/garden-scene.jpg" data-poster="media/garden-scene.jpg" data-animation="media/garden-scene.gif" loading="lazy" decoding="async" alt="Garden rendered with style 32"></a><figcaption>Stylized scene</figcaption></figure>
-        </div>
-        <p class="meta"><strong>Garden</strong><span>Mip-NeRF 360</span></p>
-      </div>
-      <div class="scene-panel" role="tabpanel" tabindex="0" id="scene-horns" aria-labelledby="tab-horns">
-        <div class="scene-grid">
-          <figure><a class="media-box" href="media/horns-original.gif" aria-label="Open animation: Horns scene before stylization"><img src="media/horns-original.jpg" data-poster="media/horns-original.jpg" data-animation="media/horns-original.gif" loading="lazy" decoding="async" alt="Horns scene before stylization"></a><figcaption>Original scene</figcaption></figure>
-          <figure class="reference"><a class="media-box" href="media/horns-scene-reference.jpg"><img loading="lazy" src="media/horns-scene-reference.jpg" alt="Style reference 64 for Horns"></a><figcaption>Reference 64</figcaption></figure>
-          <figure><a class="media-box" href="media/horns-scene.gif" aria-label="Open animation: Horns rendered with style 64"><img src="media/horns-scene.jpg" data-poster="media/horns-scene.jpg" data-animation="media/horns-scene.gif" loading="lazy" decoding="async" alt="Horns rendered with style 64"></a><figcaption>Stylized scene</figcaption></figure>
-        </div>
-        <p class="meta"><strong>Horns</strong><span>LLFF</span></p>
-      </div>
+      <fieldset class="style-picker" hidden>
+        <legend>Choose a reference</legend>
+        <div id="style-options"></div>
+      </fieldset>
+      <noscript><p>Orchids with reference 3. Enable JavaScript to choose another scene or reference.</p></noscript>
     </section>
     <section id="controls" aria-labelledby="controls-title">
       <div class="section-head"><h2 id="controls-title">FGW texture controls</h2></div>
@@ -110,15 +109,6 @@
             <div class="control-meta"><a href="media/horns-control-reference.jpg"><img loading="lazy" src="media/horns-control-reference.jpg" alt="Open Horns style reference 107"></a><span>Horns · Reference 107</span><a href="media/horns-control.gif">Open GIF</a></div>
           </div>
         </article>
-      </div>
-    </section>
-    <section id="orbit" aria-labelledby="orbit-title">
-      <div class="section-head"><h2 id="orbit-title">Kitchen · Object orbit</h2></div>
-      <p class="section-description">A full turn around the toy loader. A scene-specific 3D crop separates the loader from the table. Both views render the same Gaussians along the same camera path. The stylized loader uses the boxed texture from reference 39.</p>
-      <div class="scene-grid orbit-grid">
-        <figure><a class="media-box" href="media/kitchen-orbit.gif" aria-label="Open animation: The yellow toy loader rotating on white"><img src="media/kitchen-orbit.jpg" data-poster="media/kitchen-orbit.jpg" data-animation="media/kitchen-orbit.gif" loading="lazy" decoding="async" alt="The yellow toy loader rotating on white"></a><figcaption>Original loader</figcaption></figure>
-        <figure class="reference"><a class="media-box" href="media/kitchen-orbit-reference.jpg"><img src="media/kitchen-orbit-reference.jpg" loading="lazy" alt="Style reference 39 used for the loader"></a><figcaption>Reference 39</figcaption></figure>
-        <figure><a class="media-box" href="media/kitchen-orbit-stylized.gif" aria-label="Open animation: The same toy loader after regional texture transfer"><img src="media/kitchen-orbit-stylized.jpg" data-poster="media/kitchen-orbit-stylized.jpg" data-animation="media/kitchen-orbit-stylized.gif" loading="lazy" decoding="async" alt="The same toy loader after regional texture transfer"></a><figcaption>Stylized loader</figcaption></figure>
       </div>
     </section>
   </main>

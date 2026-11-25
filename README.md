@@ -2,7 +2,7 @@
 
 Stylize a 3D Gaussian scene from one reference image. Semantic and geometric regions connect the scene to patches of the reference through fused Gromov–Wasserstein (FGW) transport. The same edit can be rendered from multiple cameras.
 
-[Visual examples](docs/index.html) · [Kitchen object orbit](docs/media/kitchen-orbit.gif) · [FGW texture placement on Flower](docs/media/flower-control.gif)
+[Visual examples](docs/index.html) · [Kitchen LEGO brick orbit](docs/media/kitchen-orbit-stylized.gif) · [FGW texture placement on Flower](docs/media/flower-control.gif)
 
 ## Install
 
@@ -97,9 +97,11 @@ python -m scripts.render_object_orbit \
   --output output/kitchen-loader.gif --export-ply output/kitchen-loader.ply
 ```
 
-Use a refined Kitchen reconstruction in the preset’s coordinate system. Add `--appearance /path/to/stylized/point_cloud.ply` to replay the same 72 views with a registered appearance. The script verifies positions, rotations, scales and opacities before applying the selection. The website shows the original loader alongside the region-2, 100% in-box appearance fitted with reference 39. A reconstruction in a different coordinate frame requires its own crop.
+Use a refined Kitchen reconstruction in the preset’s coordinate system. Add `--appearance /path/to/stylized/point_cloud.ply` to replay the same 72 views with a registered appearance. The script verifies positions, rotations, scales and opacities before applying the selection. The website pairs the original loader with the appearance fitted to the complete LEGO brick image (reference 133). The Kitchen scene was stylized before extracting the same object from both models. A reconstruction in a different coordinate frame requires its own crop.
 
 ## Project page and attribution
+
+The scene selector covers twelve scenes. Each reference thumbnail selects a stylized result rendered on the original camera path.
 
 Open [docs/index.html](docs/index.html) directly, or run `python -m http.server 8000 --directory docs` and visit `http://localhost:8000`.
 
