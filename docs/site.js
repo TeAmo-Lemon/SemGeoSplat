@@ -11,13 +11,49 @@
   const preference = window.matchMedia('(prefers-reduced-motion: reduce)');
   const visible = new Set();
   let motion = !preference.matches;
+  const onPages = location.hostname.endsWith('.github.io');
+  const videoRoot = onPages
+    ? 'https://raw.githubusercontent.com/TeAmo-Lemon/SemGeoSplat/9c50d278e4641bb691e9c90503314c7447c1ef64/docs/media/gallery'
+    : '../gallery-videos';
+  const sources = new Map();
+
+  function clearSource(video) {
+    const previous = sources.get(video);
+    if (!previous) return;
+    previous.controller?.abort();
+    if (previous.blobUrl) URL.revokeObjectURL(previous.blobUrl);
+    sources.delete(video);
+  }
+
+  async function retryWithVideoMime(video) {
+    const source = sources.get(video);
+    if (!onPages || !source || source.controller || !video.error) return;
+    if (video.error.code !== MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED && video.error.code !== MediaError.MEDIA_ERR_DECODE) return;
+    // GitHub serves raw MP4s as octet-stream. Retry only when native loading rejects it.
+    source.controller = new AbortController();
+    try {
+      const response = await fetch(source.url, { signal: source.controller.signal });
+      if (!response.ok) throw new Error('Could not load video: ' + response.status);
+      const bytes = await response.blob();
+      if (sources.get(video) !== source) return;
+      source.blobUrl = URL.createObjectURL(bytes.slice(0, bytes.size, 'video/mp4'));
+      video.src = source.blobUrl;
+      video.load();
+    } catch (error) {
+      if (error.name !== 'AbortError' && sources.get(video) === source) video.controls = true;
+    }
+  }
+
 
   function updateVideos() {
     if (!motion || !visible.has(comparison) || document.hidden) {
       videos.forEach(video => video.pause());
       return;
     }
-    for (const video of videos) video.preload = 'auto';
+    for (const video of videos) {
+      video.preload = 'auto';
+      if (video.error) retryWithVideoMime(video);
+    }
     // Start the two trajectories together, including after a reference switch.
     if (videos.some(video => video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA)) {
       videos.forEach(video => video.pause());
@@ -44,6 +80,7 @@
     video.controls = false;
     video.addEventListener('canplay', updateVideos);
     video.addEventListener('waiting', updateVideos);
+    video.addEventListener('error', updateVideos);
   }
   original.addEventListener('timeupdate', () => {
     if (!original.paused && !styled.paused && Math.abs(original.currentTime - styled.currentTime) > 0.12) {
@@ -60,13 +97,17 @@
   function showStyle(style, updateUrl) {
     const scene = select.selectedOptions[0];
     const directory = 'media/gallery/' + scene.value;
+    const videoDirectory = videoRoot + '/' + scene.value;
     for (const video of videos) {
       const isOriginal = video === original;
-      const base = directory + '/' + (isOriginal ? 'original' : style);
+      const name = isOriginal ? 'original' : style;
+      const url = videoDirectory + '/' + name + '.mp4';
+      clearSource(video);
+      sources.set(video, {url, controller: null, blobUrl: null});
       video.pause();
       video.preload = 'none';
-      video.poster = base + '.jpg';
-      video.src = base + '.mp4';
+      video.poster = directory + '/' + name + '.jpg';
+      video.src = url;
       video.setAttribute('aria-label', isOriginal ? 'Original ' + scene.text : scene.text + ' rendered with reference ' + style);
       video.load();
     }
@@ -78,8 +119,8 @@
 
     const originalGif = Boolean(scene.dataset.gifStyle);
     const styleGif = scene.dataset.gifStyle === style;
-    setLink('original-link', originalGif ? 'media/' + scene.value + '-original.gif' : directory + '/original.mp4', originalGif ? 'Open GIF' : 'Open clip');
-    setLink('styled-link', styleGif ? 'media/' + scene.value + '-scene.gif' : directory + '/' + style + '.mp4', styleGif ? 'Open GIF' : 'Open clip');
+    setLink('original-link', originalGif ? 'media/' + scene.value + '-original.gif' : videoDirectory + '/original.mp4', originalGif ? 'Open GIF' : 'Open clip');
+    setLink('styled-link', styleGif ? 'media/' + scene.value + '-scene.gif' : videoDirectory + '/' + style + '.mp4', styleGif ? 'Open GIF' : 'Open clip');
     if (updateUrl && location.protocol !== 'file:') {
       const url = new URL(location.href);
       url.searchParams.set('scene', scene.value);
@@ -142,6 +183,9 @@
     updateMotion();
   });
   document.addEventListener('visibilitychange', updateMotion);
+  window.addEventListener('pagehide', event => {
+    if (!event.persisted) videos.forEach(clearSource);
+  });
 
   const query = new URLSearchParams(location.search);
   if ([...select.options].some(option => option.value === query.get('scene'))) select.value = query.get('scene');
