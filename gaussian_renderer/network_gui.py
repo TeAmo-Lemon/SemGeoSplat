@@ -8,7 +8,21 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
-"""Live training viewer. Training and rendering must share the module lock when accessing Gaussian parameters."""
+"""
+Interactive viewer (viser + nerfview) replacing the original SIBR socket bridge.
+
+Public surface used by train.py:
+
+    lock = network_gui.init(host, port)            # also starts the viewer
+    network_gui.bind_scene(gaussians, pipe, background)
+    network_gui.update(iteration, num_train_rays_per_step=1)
+    network_gui.complete()
+
+The training thread MUST acquire `lock` around any read or write of
+`gaussians` (forward, backward, optimizer.step, densify_and_prune,
+reset_opacity, oneupSHdegree, restore). The viewer thread takes the same lock
+around render_fn so a viewer render can never observe half-densified state.
+"""
 
 import threading
 import numpy as np
@@ -17,11 +31,10 @@ import torch
 try:
     import viser
     import nerfview
-
     _IMPORT_ERR = None
-except Exception as _e:  # pragma: no cover
-    viser = None  # type: ignore
-    nerfview = None  # type: ignore
+except Exception as _e:                      # pragma: no cover
+    viser = None                              # type: ignore
+    nerfview = None                           # type: ignore
     _IMPORT_ERR = _e
 
 # Module state. Single source of truth.
@@ -30,16 +43,14 @@ _state = {
     "pipe": None,
     "background": None,
     "scaling_modifier": 1.0,
-    "render_mode": "RGB",  # "RGB" or "DINO"; toggled once DINO features exist
+    "render_mode": "RGB",       # "RGB" or "DINO"; toggled once DINO features exist
 }
-lock = threading.Lock()  # shared with train.py
+lock = threading.Lock()      # shared with train.py
 _viewer = None
 _server = None
 _host = None
 _port = None
-_dino_cmap = (
-    None  # (mean[D], proj[D,3], lo[3], hi[3]); built lazily on first DINO render
-)
+_dino_cmap = None            # (mean[D], proj[D,3], lo[3], hi[3]); built lazily on first DINO render
 
 # Kept so any stray external caller (or `if network_gui.conn is None:` checks
 # elsewhere) does not crash. The new viewer runs on its own thread; this flag
@@ -51,14 +62,12 @@ def init(host, port):
     """Start the viser+nerfview viewer. Returns the shared lock."""
     global _viewer, _server, _host, _port
     if _IMPORT_ERR is not None:
-        print(
-            f"[viewer] disabled (viser/nerfview unavailable: "
-            f"{type(_IMPORT_ERR).__name__}: {_IMPORT_ERR})"
-        )
+        print(f"[viewer] disabled (viser/nerfview unavailable: "
+              f"{type(_IMPORT_ERR).__name__}: {_IMPORT_ERR})")
         return lock
 
     def render_fn(camera_state, render_tab_state):
-        from gaussian_renderer import render as _gs_render  # lazy: circular-import safe
+        from gaussian_renderer import render as _gs_render   # lazy: circular-import safe
         from scene.cameras import MiniCam
 
         W = int(render_tab_state.viewer_width)
@@ -84,59 +93,37 @@ def init(host, port):
             # guarantees atomic single-attribute write).
             sm = _state["scaling_modifier"]
             with torch.no_grad():
-                if (
-                    _state["render_mode"] == "DINO"
-                    and gaussians.get_dino_features.shape[0] > 0
-                ):
+                if (_state["render_mode"] == "DINO"
+                        and gaussians.get_dino_features.shape[0] > 0):
                     global _dino_cmap
                     if _dino_cmap is None:
                         _dino_cmap = _build_dino_colormap(gaussians)
                     from gaussian_renderer import render_features as _gs_render_feat
-
-                    feat = _gs_render_feat(
-                        cam, gaussians, gaussians.get_dino_features
-                    )  # [D,H,W]
+                    feat = _gs_render_feat(cam, gaussians, gaussians.get_dino_features)  # [D,H,W]
                     mean, proj, lo, hi = _dino_cmap
-                    proj_map = (feat.permute(1, 2, 0) - mean) @ proj  # [H,W,3]
-                    rgb = (
-                        ((proj_map - lo) / (hi - lo).clamp_min(1e-8))
-                        .clamp(0, 1)
-                        .permute(2, 0, 1)
-                    )
-                elif (
-                    _state["render_mode"] == "Region"
-                    and getattr(gaussians, "cluster_labels", None) is not None
-                ):
+                    proj_map = (feat.permute(1, 2, 0) - mean) @ proj                     # [H,W,3]
+                    rgb = ((proj_map - lo) / (hi - lo).clamp_min(1e-8)).clamp(0, 1).permute(2, 0, 1)
+                elif (_state["render_mode"] == "Region"
+                        and getattr(gaussians, "cluster_labels", None) is not None):
                     labels = gaussians.cluster_labels
                     device = gaussians.get_xyz.device
                     labels = labels.to(device)
                     cmap = _build_region_colormap(labels).to(device)
                     K = cmap.shape[0]
-                    colors = torch.full(
-                        (labels.shape[0], 3), 0.12, device=device, dtype=torch.float32
-                    )
+                    colors = torch.full((labels.shape[0], 3), 0.12,
+                                        device=device, dtype=torch.float32)
                     valid = labels >= 0
                     if valid.any() and K > 0:
                         colors[valid] = cmap[labels[valid].clamp(min=0) % K]
                     rgb = _gs_render(
-                        cam,
-                        gaussians,
-                        pipe,
-                        background,
-                        scaling_modifier=sm,
+                        cam, gaussians, pipe, background, scaling_modifier=sm,
                         override_color=colors,
                     )["render"]
                 else:
                     rgb = _gs_render(
-                        cam,
-                        gaussians,
-                        pipe,
-                        background,
-                        scaling_modifier=sm,
+                        cam, gaussians, pipe, background, scaling_modifier=sm,
                     )["render"]
-        return (
-            (rgb.clamp(0, 1) * 255).byte().permute(1, 2, 0).contiguous().cpu().numpy()
-        )
+        return (rgb.clamp(0, 1) * 255).byte().permute(1, 2, 0).contiguous().cpu().numpy()
 
     _server = viser.ViserServer(host=host, port=port, verbose=False)
     _viewer = nerfview.Viewer(server=_server, render_fn=render_fn, mode="training")
@@ -150,15 +137,15 @@ def init(host, port):
     if "train_util_slider" in _viewer._training_tab_handles:
         _viewer._training_tab_handles["train_util_slider"].value = 1.0
 
+    # 把 Scaling modifier 直接挂在主面板 root level (不放 folder 里),
+    # 并用 order=-1 让它排在 nerfview 自带的 Training/Rendering folder 上方,
+    # 用户打开 viser 一眼就能看到.
     sm_slider = _server.gui.add_slider(
         "Scaling modifier",
-        min=0.0,
-        max=2.0,
-        step=0.01,
-        initial_value=1.0,
+        min=0.0, max=2.0, step=0.01, initial_value=1.0,
         order=-1.0,
         hint="缩放所有高斯椭球的尺度 (0=完全收缩, 1=训练值, >1=放大). "
-        "想看每个高斯的『骨架』可以拖到 ~0.3.",
+             "想看每个高斯的『骨架』可以拖到 ~0.3.",
     )
 
     @sm_slider.on_update
@@ -201,12 +188,12 @@ def _build_dino_colormap(gaussians):
 
     Returns (mean[D], proj[D,3], lo[3], hi[3]); normalization range is mean±2std
     over the centred projection so DINO colours stay consistent across viewpoints."""
-    feats = gaussians.get_dino_features.detach().float()  # [N, D]
+    feats = gaussians.get_dino_features.detach().float()      # [N, D]
     mean = feats.mean(dim=0)
     centred = feats - mean
     _, _, V = torch.pca_lowrank(centred, q=min(3, feats.shape[1]))
-    proj = V[:, :3]  # [D, 3]
-    projected = centred @ proj  # [N, 3]
+    proj = V[:, :3]                                           # [D, 3]
+    projected = centred @ proj                                # [N, 3]
     std = projected.std(dim=0)
     return mean, proj, -2.0 * std, 2.0 * std
 
@@ -214,7 +201,6 @@ def _build_dino_colormap(gaussians):
 def _build_region_colormap(labels: torch.Tensor) -> torch.Tensor:
     """Build (K, 3) HSV colormap for *labels* (unique non-negative values)."""
     import colorsys
-
     unique = torch.unique(labels[labels >= 0])
     K = unique.numel()
     if K == 0:
@@ -238,7 +224,9 @@ def update(iteration, num_train_rays_per_step=1):
 # pause button (useful for headless / scripted runs).
 disable_pause = False
 
-
+# 训练结束后是否挂起主线程让 viser 继续提供浏览界面.
+# 默认 True: 训练完后保留 viser, 用户可以继续在浏览器里查看结果, 按 Ctrl+C 退出.
+# 批量脚本 (例如 full_eval.py) 若不希望挂起, 设为 True 即可立即返回.
 disable_hang_on_complete = False
 
 
@@ -251,7 +239,6 @@ def wait_if_paused(iteration):
     if _viewer is None:
         return
     import time
-
     while _viewer.state == "paused":
         time.sleep(0.05)
     # One quick re-render right after un-pause so the user sees fresh state.
@@ -269,8 +256,9 @@ def complete():
     if disable_hang_on_complete:
         return
 
+    # 训练完毕后挂起主线程, 让 viser 服务器继续运行, 用户可以在浏览器里
+    # 自由浏览最终的高斯点云. 按 Ctrl+C 退出.
     import time
-
     url = f"http://{_host}:{_port}" if _host else "viser"
     print(f"[viewer] 训练完成. viser 已切换到浏览模式, 可继续访问: {url}")
     print("[viewer] 按 Ctrl+C 退出.")
@@ -284,18 +272,8 @@ def complete():
 # --- legacy stubs --------------------------------------------------------
 # Kept as no-ops so any stale call site fails soft, not loud.
 
-
-def try_connect():
-    pass
-
-
-def read():
-    return None
-
-
-def send(_a, _b):
-    pass
-
-
+def try_connect(): pass
+def read(): return None
+def send(_a, _b): pass
 def receive():
     return None, None, None, None, None, None

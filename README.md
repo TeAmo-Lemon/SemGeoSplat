@@ -1,115 +1,106 @@
 # SemGeoSplat
 
-3D Gaussian scene stylization with semantic-geometric regions and fused Gromov-Wasserstein matching.
+Stylize a 3D Gaussian scene from one reference image. Semantic and geometric regions connect the scene to patches of the reference through fused Gromov–Wasserstein (FGW) transport. The same edit can be rendered from multiple cameras.
 
-**[Project website and visual results](https://teamo-lemon.github.io/SemGeoSplat/)**
+[Visual examples](docs/index.html) · [Kitchen object orbit](docs/media/kitchen-orbit.gif) · [FGW texture placement on Flower](docs/media/flower-control.gif)
 
-Starting from a trained Gaussian scene, SemGeoSplat refines the geometry, distills DINOv3 features, decomposes a reference image into style primitives, constructs 3D regions, matches regions to primitives, and optimizes the scene's appearance.
+## Install
 
-## Installation
-
-Use Linux, Python 3.10, an NVIDIA GPU, and a CUDA 12.4-compatible driver. CUDA compilation also requires a C++ compiler. Run these commands from the repository root:
+Use Linux with an NVIDIA GPU, a CUDA 12.4-compatible driver and Conda. Run commands from the repository root.
 
 ```bash
-git clone --recurse-submodules https://github.com/TeAmo-Lemon/SemGeoSplat.git
-cd SemGeoSplat
 conda env create -f environment.yml
 conda activate semgeo
-pip install submodules/fused-ssim --no-build-isolation
 ```
 
-For an existing Python 3.10 environment with the CUDA 12.4 toolkit:
+The environment includes PyTorch and gsplat. Scene and reference features use DINOv3 from ModelScope. The first style fit also downloads the torchvision VGG16 weights. To use the optional fused SSIM implementation, run the following with a compatible CUDA compiler. The training code includes a PyTorch fallback.
 
 ```bash
-pip install -r requirements.txt
-git submodule update --init --recursive
-pip install submodules/fused-ssim --no-build-isolation
+python -m pip install --no-build-isolation 'git+https://github.com/rahul-goel/fused-ssim.git@a7c48d6dd7ac6dc39a7958c7c4452e0b10418f38'
 ```
 
-The first stylization run downloads DINOv3 from ModelScope and VGG16 from torchvision unless their weights are already cached. Model weights and datasets are not included. The default DINO backbone is `facebook/dinov3-vith16plus-pretrain-lvd1689m`; select another compatible backbone with `--dino_model`.
+## Stylize and render a scene
 
-## Prepare a scene
-
-Use a COLMAP scene with `images/` and `sparse/0/`, or a NeRF synthetic scene with its transform JSON files. To prepare a photo collection, place the photos in `<scene>/input/` and run `python convert.py -s <scene>` with COLMAP installed. ImageMagick is needed only for `convert.py --resize`.
-
-Train a base Gaussian scene, or use an existing compatible `point_cloud.ply`:
+Point `SCENE` at a COLMAP reconstruction with `images/` and `sparse/0/`. For a downsampled image directory, pass the same `-i images_2` or `-i images_4` argument to both training commands. You can start at the second command if you already have a base Gaussian PLY registered to those cameras. Change `STYLE` to try your own image.
 
 ```bash
-python train.py -s /path/to/scene -m output/base_scene --eval --disable_viewer
+SCENE=/path/to/scene
+STYLE=docs/media/garden-scene-reference.jpg
+BASE=output/base
+STYLED=output/styled
+
+python train.py -s "$SCENE" -m "$BASE" --disable_viewer
+python train_style.py -s "$SCENE" -m "$STYLED" \
+  --start_ply "$BASE/point_cloud/iteration_30000/point_cloud.ply" \
+  --style_image "$STYLE" --spatial_fgw_routing local --disable_viewer
+
+python render.py -m "$STYLED" --iteration 1500 --skip_test --save-gif
+python viewer.py -m "$STYLED" -i 1500 --host 127.0.0.1
 ```
 
-## Stylize
+The default style fit saves `point_cloud/iteration_1500/` in the style model. The GIF above uses the training cameras and is written under `train/ours_1500/`. To make a moving-camera comparison, use **Save Trajectory** in the viewer and render both models with the same path.
 
 ```bash
-python train_style.py \
-  -s /path/to/scene \
-  -m output/stylized_scene \
-  --start_ply output/base_scene/point_cloud/iteration_30000/point_cloud.ply \
-  --style_image /path/to/style.jpg \
-  --eval --disable_viewer
+python render.py -m "$BASE" --iteration 30000 --camera-path trajectory.json --save-gif
+python render.py -m "$STYLED" --iteration 1500 --camera-path trajectory.json --save-gif
 ```
 
-DINO feature extraction runs automatically. Refinement and distilled-feature caches are stored beside the input checkpoint in `point_cloud/iteration_refine/` and reused across styles, so the input model directory must be writable. Use `--force_refine` or `--force_dino` to rebuild these caches. Give each scene/style pair a separate output directory.
+## Choose a region and edit its appearance
 
-The final scene is saved as `output/stylized_scene/point_cloud/iteration_1500/point_cloud.ply` with region and style sidecars. `cfg_args` records the run configuration.
-
-| Option | Default | Purpose |
-| --- | --- | --- |
-| `--refine_iterations` | `500` | Refinement steps |
-| `--prune_percent` | `0.2` | Fraction removed per pruning round |
-| `--dino_distill_iterations` | `3000` | Semantic distillation steps |
-| `--dino_feature_dim` | `32` | Distilled feature dimension |
-| `--style_primitive_k` | `8` | Number of style primitives |
-| `--region_merge_max_cost` | `0.60` | Region merge threshold |
-| `--fgw_alpha` | `0.5` | Balance between feature and structure costs |
-| `--style_iterations` | `1500` | Appearance optimization steps |
-| `--style_render_scale` | `0.5` | Training render scale |
-
-Optional scene-specific overrides are listed in [`configs/scene_presets.json`](configs/scene_presets.json). They are not applied automatically: pass their keys as command-line options. For example, the counter preset adds `--style_primitive_k 6 --region_merge_max_cost 0.50 --fgw_alpha 0.7`. See `python train_style.py --help` for all options.
-
-## View and export
+Render the cluster colors and look up their IDs. The example below applies half the fitted appearance to region 6 and leaves the rest of the scene at its original appearance. Replace 6 with a fitted region in your scene. The export writes a new PLY and runs on CPU.
 
 ```bash
-python viewer.py -m output/stylized_scene --port 8081
-python render.py -m output/stylized_scene --save-gif
+ITER="$STYLED/point_cloud/iteration_1500"
+REFINE="$BASE/point_cloud/iteration_refine"
+
+python render.py -m "$STYLED" --iteration 1500 --skip_test --render-regions --region-color-source clusters
+python style_control.py list "$ITER"
+python style_control.py export "$ITER" --source-ply "$REFINE/point_cloud.ply" \
+  --strength 0 --region 6=0.5 --output output/edited.ply
 ```
 
-The viewer supports RGB, semantic features, region visualization, and camera-path export. To render a saved trajectory without the original dataset:
+For finer control, a recipe specifies how a region uses a particular patch of the reference. The [Flower recipe](configs/flower-placement.json) is one of the settings shown on the project page. It uses region 6, the marked patch of reference 77, a 50% share and a placement bias of +0.75. The region ID and 3D anchor belong to that reconstruction. When adapting the recipe, choose the ID from your region render and an anchor on the object in the coordinate system of your PLY.
+
+| Recipe field | What it controls |
+|---|---|
+| `strength` | Appearance strength from 0 (original) to 1 (fully fitted). |
+| `texture_mix.box` | A rectangle in the reference image, in normalized left, top, right, bottom coordinates. |
+| `texture_mix.fraction` | The fraction of the region’s transport mass assigned to patches inside the rectangle. |
+| `texture_mix.source_bias` | With the `centroid` profile, positive bias moves the selected texture toward the 3D anchor along the region graph. Negative bias moves it away. The patch share remains fixed. |
+
+Pass `--style_control_file recipe.json --spatial_fgw_routing local` to `train_style.py` to use a recipe when fitting a new appearance. To change placement after fitting, use the saved region, PCA and reference-patch caches and two appearances fitted on the same Gaussians.
 
 ```bash
-python render.py -m output/stylized_scene \
-  --camera-path /path/to/trajectory.json --save-gif
+python -m scripts.solve_fgw_recipe \
+  --source "$REFINE/point_cloud.ply" --regions "$ITER/regions.pt" \
+  --pca "$REFINE/dino_features.pt" --style-primitives "$ITER/style_primitives.pt" \
+  --style-image "$STYLE" --control recipe.json --region 6 \
+  --contrast-weight 0.25 --output output/edit-plan.pt
+
+python -m scripts.render_fgw_appearance \
+  --source "$REFINE/point_cloud.ply" --regions "$ITER/regions.pt" \
+  --transport output/edit-plan.pt --region 6 \
+  --endpoint-a outside.ply --endpoint-b inside.ply \
+  --cameras-json "$STYLED/cameras.json" --views 0 --output-dir output/preview \
+  --export-ply output/placed.ply
 ```
 
-Dataset-view renders go into `train/ours_<iteration>/renders/` and `test/ours_<iteration>/renders/`. GIF export defaults to training views; add `--gif-test` for test views. Trajectory frames and animations go into `trajectory/<path-name>/ours_<iteration>/`. Use `--gif-max-size 640 --gif-colors 64` for smaller GIFs, and `--force` to rebuild existing renders. Omit `--disable_viewer` during training to enable the live viewer.
+Use the exact reference file that produced `style_primitives.pt`. To make `outside.ply` and `inside.ply`, fit two style models with the same base, reference, selected region and box. Set `fraction` to 0 for the first model and 1 for the second. Use their `point_cloud.ply` files as the two endpoints. For an original-to-stylized transition you can instead use the refined source as endpoint A and the existing stylized PLY as B. The solver runs on CPU. Rendering new views uses the GPU.
 
-## Standard reconstruction metrics
+## Isolate the Kitchen loader
 
-The original 3DGS PSNR, SSIM and LPIPS evaluation is retained for reconstruction checks:
+The Kitchen example uses a [calibrated 3D crop](configs/kitchen-loader.json), including the tabletop plane and the contacts of the tracks. The renderer selects the object once from the original Gaussian model and orbits it on white. The following command also exports a standalone object PLY.
 
 ```bash
-python render.py -m output/base_scene --skip_train --write-gt
-python metrics.py -m output/base_scene
+python -m scripts.render_object_orbit \
+  --source "$REFINE/point_cloud.ply" --recipe configs/kitchen-loader.json \
+  --output output/kitchen-loader.gif --export-ply output/kitchen-loader.ply
 ```
 
-## Repository layout
+Use a refined Kitchen reconstruction in the preset’s coordinate system. Add `--appearance /path/to/stylized/point_cloud.ply` to replay the same 72 views with a registered appearance. The script verifies positions, rotations, scales and opacities before applying the selection. The website shows the original loader alongside the region-2, 100% in-box appearance fitted with reference 39. A reconstruction in a different coordinate frame requires its own crop.
 
-```text
-train.py                 Base Gaussian scene training
-train_style.py           SemGeoSplat training entry point
-render.py / viewer.py    Rendering, animation export and interactive viewing
-arguments/              Command-line parameters
-style_pipeline/         Refinement, features, regions, matching and style optimization
-scene/                  Gaussian scene and dataset loading
-gaussian_renderer/      gsplat rendering and live viewer integration
-semgeo_utils/           Shared utilities and DINO feature extraction
-configs/                Optional scene parameter presets
-submodules/fused-ssim/   Optional accelerated SSIM implementation
-docs/                   GitHub Pages website
-```
+## Project page and attribution
 
-## Acknowledgments and license
+Open [docs/index.html](docs/index.html) directly, or run `python -m http.server 8000 --directory docs` and visit `http://localhost:8000`.
 
-This implementation builds on [3D Gaussian Splatting](https://github.com/graphdeco-inria/gaussian-splatting), [gsplat](https://github.com/nerfstudio-project/gsplat), [DINOv3](https://github.com/facebookresearch/dinov3), [POT](https://github.com/PythonOT/POT), [viser](https://github.com/nerfstudio-project/viser), [nerfview](https://github.com/nerfstudio-project/nerfview), and [fused-ssim](https://github.com/rahul-goel/fused-ssim).
-
-See [`LICENSE.md`](LICENSE.md). Upstream copyright notices and third-party license terms are retained in the corresponding files and dependency repositories.
+The implementation builds on the Graphdeco reconstruction code, gsplat rasterization and DINOv3 features. The gallery uses Mip-NeRF 360 and LLFF scenes. Upstream reconstruction evaluation is available through `metrics.py` and `full_eval.py`. The repository retains the Graphdeco license. [3D Gaussian Splatting](https://github.com/graphdeco-inria/gaussian-splatting) · [gsplat](https://github.com/nerfstudio-project/gsplat) · [DINOv3](https://github.com/facebookresearch/dinov3) · [License](LICENSE.md)

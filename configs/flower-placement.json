@@ -1,0 +1,26 @@
+{
+  "default_region_strength": 0.0,
+  "regions": {
+    "6": {
+      "strength": 1.0,
+      "texture_mix": {
+        "box": [
+          0.07,
+          0.25,
+          0.5,
+          0.54
+        ],
+        "fraction": 0.5,
+        "source_bias": {
+          "anchor_xyz": [
+            7.914564609527588,
+            -0.7828778028488159,
+            27.145362854003906
+          ],
+          "bias": 0.75,
+          "profile": "centroid"
+        }
+      }
+    }
+  }
+}

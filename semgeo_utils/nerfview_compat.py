@@ -39,11 +39,7 @@ class MP4Writer:
             raise ValueError("Video writer is closed.")
         try:
             image = np.asarray(image)
-            if (
-                image.ndim != 3
-                or image.shape[2] not in (3, 4)
-                or image.dtype != np.uint8
-            ):
+            if image.ndim != 3 or image.shape[2] not in (3, 4) or image.dtype != np.uint8:
                 raise ValueError("Video frames must be uint8 RGB or RGBA images.")
             height, width = image.shape[:2]
             if self._size is None:
@@ -54,9 +50,7 @@ class MP4Writer:
                 raise ValueError("All video frames must have the same resolution.")
             # H.264 yuv420p needs even dimensions; pad instead of resizing the scene.
             image = np.pad(image[:, :, :3], ((0, height % 2), (0, width % 2), (0, 0)))
-            frame = self._av.VideoFrame.from_ndarray(
-                np.ascontiguousarray(image), format="rgb24"
-            )
+            frame = self._av.VideoFrame.from_ndarray(np.ascontiguousarray(image), format="rgb24")
             for packet in self._stream.encode(frame):
                 self._container.mux(packet)
         except Exception:
@@ -114,11 +108,8 @@ def _patch_keyframe_delete(camera_path_class):
     if not matches:
         return
     if len(matches) != 1:
-        raise RuntimeError(
-            "Unexpected nerfview keyframe callback layout; cannot apply compatibility fix."
-        )
-    matches[0].body = ast.parse(
-        textwrap.dedent("""
+        raise RuntimeError("Unexpected nerfview keyframe callback layout; cannot apply compatibility fix.")
+    matches[0].body = ast.parse(textwrap.dedent("""
         current = self._keyframes.pop(keyframe_index, None)
         modal.close()
         if current is None:
@@ -128,8 +119,7 @@ def _patch_keyframe_delete(camera_path_class):
         if self._camera_edit_panel is camera_edit_panel:
             self._camera_edit_panel = None
         self.update_spline()
-    """)
-    ).body
+    """)).body
     ast.fix_missing_locations(tree)
     namespace = original.__globals__.copy()
     exec(compile(tree, "<semgeo nerfview keyframe fix>", "exec"), namespace)

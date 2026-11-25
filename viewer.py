@@ -1,11 +1,23 @@
 #!/usr/bin/env python3
-"""Interactive RGB and semantic-feature viewer with camera-path export."""
+"""
+Interactive 3D Gaussian Splatting viewer.
+
+Usage:
+    python viewer.py                                              # browse via UI
+    python viewer.py --base-path /path/to/output_sem              # custom base path
+    python viewer.py -m /path/to/output/scene                     # load scene directly
+    python viewer.py -m /path/to/output/scene -i 7000             # specific iteration
+    python viewer.py -m /path/to/output/scene --port 8081         # custom port
+
+Dependencies: viser, nerfview, gsplat
+"""
 
 from __future__ import annotations
 
 import argparse
 import json
 import math
+import os
 import re
 import signal
 import sys
@@ -15,7 +27,7 @@ from typing import Optional
 import numpy as np
 import torch
 
-DEFAULT_MODEL_ROOT = "./output"
+DEFAULT_MODEL_ROOT = "output"
 
 # Add project root to path so we can import local modules
 _project_root = Path(__file__).resolve().parent
@@ -92,15 +104,12 @@ def _load_gaussians(model_path: Path, iteration: int) -> tuple:
     if iteration < 0:
         ply_path = _find_latest_ply(model_path)
     else:
-        ply_path = (
-            model_path / "point_cloud" / f"iteration_{iteration}" / "point_cloud.ply"
-        )
+        ply_path = model_path / "point_cloud" / f"iteration_{iteration}" / "point_cloud.ply"
     if not ply_path.is_file():
         raise FileNotFoundError(f"ply not found: {ply_path}")
 
     # Read the first point to determine SH degree from the feature count
     from plyfile import PlyData
-
     ply = PlyData.read(str(ply_path))
     extra_f_names = sorted(
         [p.name for p in ply.elements[0].properties if p.name.startswith("f_rest_")],
@@ -115,43 +124,41 @@ def _load_gaussians(model_path: Path, iteration: int) -> tuple:
     print(f"Loaded {gs.get_xyz.shape[0]:,} gaussians  (SH degree {sh_degree})")
     print(f"  from: {ply_path}")
 
+    # DINO sidecar (per-gaussian): 新位置在 refine 目录 (跨 style 复用), 旧产物在
+    # ply 同目录兜底; load_dino_sidecar 校验点数 + xyz 指纹, 几何不匹配时自动跳过.
     has_dino = False
     dino_path = _find_dino_sidecar(model_path, ply_path)
     if dino_path is not None:
         try:
             gs.load_dino_sidecar(str(dino_path))
             has_dino = True
-            print(
-                f"  + DINO features [{gs.get_dino_features.shape[1]}D] from: {dino_path}"
-            )
+            print(f"  + DINO features [{gs.get_dino_features.shape[1]}D] from: {dino_path}")
         except Exception as exc:
             print(f"  ! DINO sidecar found but unusable ({exc}); RGB only")
 
+    # 同目录若有 regions.pt 则一并加载 (区域可视化用).
     has_regions = False
     regions_path = ply_path.parent / "regions.pt"
     if regions_path.is_file():
         try:
-            regions_data = torch.load(
-                str(regions_path), map_location="cpu", weights_only=True
-            )
+            regions_data = torch.load(str(regions_path), map_location="cpu", weights_only=True)
             cluster_labels = regions_data.get("cluster_labels")
             if cluster_labels is not None:
                 n_gs = gs.get_xyz.shape[0]
                 if cluster_labels.shape[0] != n_gs:
-                    print(
-                        f"  ! regions.pt label count ({cluster_labels.shape[0]}) "
-                        f"!= gaussians ({n_gs}); skipping"
-                    )
+                    print(f"  ! regions.pt label count ({cluster_labels.shape[0]}) "
+                          f"!= gaussians ({n_gs}); skipping")
                 else:
                     gs.cluster_labels = cluster_labels
                     n_regions = int(cluster_labels.max()) + 1
                     has_regions = True
-                    print(
-                        f"  + region labels [{n_regions} regions] from: {regions_path}"
-                    )
+                    print(f"  + region labels [{n_regions} regions] from: {regions_path}")
         except Exception as exc:
             print(f"  ! regions.pt found but unusable ({exc})")
 
+    # 同目录若有 region_primitives.pt 则一并加载 (FGW 分配结果可视化).
+    # primitive_labels[N] 的值是 ⑤ FGW 给每个高斯分配的基元下标 (0..K-1),
+    # 渲染时用 primitive_labels 着色即为"分配结果"而非"聚类结果".
     has_primitives = False
     rp_path = ply_path.parent / "region_primitives.pt"
     if rp_path.is_file():
@@ -161,25 +168,22 @@ def _load_gaussians(model_path: Path, iteration: int) -> tuple:
             if primitive_labels is not None:
                 n_gs = gs.get_xyz.shape[0]
                 if primitive_labels.shape[0] != n_gs:
-                    print(
-                        f"  ! region_primitives.pt label count ({primitive_labels.shape[0]}) "
-                        f"!= gaussians ({n_gs}); skipping"
-                    )
+                    print(f"  ! region_primitives.pt label count ({primitive_labels.shape[0]}) "
+                          f"!= gaussians ({n_gs}); skipping")
                 else:
                     gs.primitive_labels = primitive_labels
                     n_primitives = int(primitive_labels.max()) + 1
                     has_primitives = True
-                    print(
-                        f"  + primitive labels [{n_primitives} primitives] from: {rp_path}"
-                    )
+                    print(f"  + primitive labels [{n_primitives} primitives] from: {rp_path}")
         except Exception as exc:
             print(f"  ! region_primitives.pt found but unusable ({exc})")
 
     return gs, sh_degree, has_dino, has_regions, has_primitives
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
 #  Camera ring display  (migrated from nerfstudio viewer: frustums + GT images)
-
+# ═══════════════════════════════════════════════════════════════════════════════
 
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tif", ".tiff"}
 
@@ -193,7 +197,6 @@ class CameraDisplayConfig:
         scale_min: Minimum frustum scale.
         scale_max: Maximum frustum scale.
     """
-
     image_height: int = 100
     scale_factor: float = 0.015
     scale_min: float = 0.01
@@ -237,11 +240,8 @@ def _load_gt_image(path: Path, config: CameraDisplayConfig) -> Optional[np.ndarr
     """Load a GT image as a small uint8 HWC array for the frustum texture."""
     try:
         from PIL import Image
-
         im = Image.open(path)
-        im.draft(
-            "RGB", (2 * config.image_height, config.image_height)
-        )  # decode JPEG at reduced scale
+        im.draft("RGB", (2 * config.image_height, config.image_height))  # decode JPEG at reduced scale
         im = im.convert("RGB")
         if im.height > config.image_height:
             w = max(1, round(im.width * config.image_height / im.height))
@@ -283,34 +283,26 @@ def _load_cameras(model_path: Path, config: CameraDisplayConfig) -> list:
         return []
     center = positions.mean(axis=0)
     extent = float(np.max(np.linalg.norm(positions - center, axis=1)))
-    scale = float(
-        np.clip(config.scale_factor * extent, config.scale_min, config.scale_max)
-    )
+    scale = float(np.clip(config.scale_factor * extent, config.scale_min, config.scale_max))
 
     from viser.transforms import SO3
 
     cams = []
     for i, c in enumerate(cam_list):
-        rot = np.asarray(c["rotation"], dtype=np.float64)  # c2w rotation
-        pos = np.asarray(c["position"], dtype=np.float64)  # c2w translation
+        rot = np.asarray(c["rotation"], dtype=np.float64)   # c2w rotation
+        pos = np.asarray(c["position"], dtype=np.float64)   # c2w translation
         fov = 2.0 * math.atan((c["height"] / 2.0) / c["fy"])  # vertical FOV
-        img_path = gt_map.get(
-            Path(c["img_name"]).stem
-        )  # img_name includes the extension
-        cams.append(
-            {
-                "name": f"/cameras/camera_{i:05d}",
-                "position": pos,
-                "wxyz": SO3.from_matrix(rot).wxyz,
-                "fov": float(fov),
-                "aspect": float(c["width"] / c["height"]),
-                "scale": scale,
-                "image": _load_gt_image(img_path, config)
-                if img_path is not None
-                else None,
-                "idx": i,
-            }
-        )
+        img_path = gt_map.get(Path(c["img_name"]).stem)   # img_name includes the extension
+        cams.append({
+            "name": f"/cameras/camera_{i:05d}",
+            "position": pos,
+            "wxyz": SO3.from_matrix(rot).wxyz,
+            "fov": float(fov),
+            "aspect": float(c["width"] / c["height"]),
+            "scale": scale,
+            "image": _load_gt_image(img_path, config) if img_path is not None else None,
+            "idx": i,
+        })
     return cams
 
 
@@ -320,13 +312,13 @@ def _build_dino_colormap(gs):
     Returns (mean[D], proj[D,3], lo[3], hi[3]) used to map rendered feature maps to
     colour. Normalization range is mean±2std over the centred projection so colours
     stay consistent across viewpoints."""
-    feats = gs.get_dino_features.detach().float()  # [N, D]
+    feats = gs.get_dino_features.detach().float()             # [N, D]
     mean = feats.mean(dim=0)
     centred = feats - mean
     # randomized PCA: V[:, :3] are the top-3 principal directions in D-space.
     _, _, V = torch.pca_lowrank(centred, q=min(3, feats.shape[1]))
-    proj = V[:, :3]  # [D, 3]
-    projected = centred @ proj  # [N, 3]
+    proj = V[:, :3]                                           # [D, 3]
+    projected = centred @ proj                                # [N, 3]
     std = projected.std(dim=0)
     lo = -2.0 * std
     hi = 2.0 * std
@@ -336,7 +328,6 @@ def _build_dino_colormap(gs):
 def _build_region_colormap(labels: torch.Tensor) -> torch.Tensor:
     """Build (K, 3) HSV colormap for *labels* (unique non-negative values)."""
     import colorsys
-
     unique = torch.unique(labels[labels >= 0])
     K = unique.numel()
     if K == 0:
@@ -349,54 +340,31 @@ def _build_region_colormap(labels: torch.Tensor) -> torch.Tensor:
     return torch.tensor(colors, dtype=torch.float32)
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
 #  Viewer
-
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Interactive 3D Gaussian Splatting viewer"
-    )
-    parser.add_argument(
-        "--base-path",
-        type=str,
-        default=DEFAULT_MODEL_ROOT,
-        help="Base directory containing 3DGS output folders (for UI browsing).",
-    )
-    parser.add_argument(
-        "-m",
-        "--model-path",
-        type=Path,
-        default=None,
-        help="Output directory of a trained scene (optional; can select via UI).",
-    )
-    parser.add_argument(
-        "-i",
-        "--iteration",
-        type=int,
-        default=-1,
-        help="Iteration to load (-1 = latest). Only used with --model-path.",
-    )
+    parser = argparse.ArgumentParser(description="Interactive 3D Gaussian Splatting viewer")
+    parser.add_argument("--base-path", type=str, default=DEFAULT_MODEL_ROOT,
+                        help="Base directory containing 3DGS output folders (for UI browsing).")
+    parser.add_argument("-m", "--model-path", type=Path, default=None,
+                        help="Output directory of a trained scene (optional; can select via UI).")
+    parser.add_argument("-i", "--iteration", type=int, default=-1,
+                        help="Iteration to load (-1 = latest). Only used with --model-path.")
     parser.add_argument("--host", type=str, default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8080)
-    parser.add_argument(
-        "--bg",
-        choices=["white", "black", "random"],
-        default="white",
-        help="Background colour (default: white).",
-    )
-    parser.add_argument(
-        "--width", type=int, default=1920, help="Viewport width (default: 1920)."
-    )
-    parser.add_argument(
-        "--height", type=int, default=1080, help="Viewport height (default: 1080)."
-    )
-    parser.add_argument(
-        "--antialiasing",
-        action="store_true",
-        help="Use anti-aliased rasterization (slower but smoother).",
-    )
+    parser.add_argument("--bg", choices=["white", "black", "random"], default="white",
+                        help="Background colour (default: white).")
+    parser.add_argument("--width", type=int, default=1920,
+                        help="Viewport width (default: 1920).")
+    parser.add_argument("--height", type=int, default=1080,
+                        help="Viewport height (default: 1080).")
+    parser.add_argument("--antialiasing", action="store_true",
+                        help="Use anti-aliased rasterization (slower but smoother).")
     args = parser.parse_args()
 
+    # ── Start viser early so UI is available ─────────────────────────────────
     import viser
     import nerfview
     from semgeo_utils.nerfview_compat import install_nerfview_compat
@@ -407,15 +375,13 @@ def main():
     install_nerfview_compat()
     server = viser.ViserServer(host=args.host, port=args.port, verbose=False)
 
-    _bg_ptr = [
-        torch.tensor(
-            {"white": [1, 1, 1], "black": [0, 0, 0], "random": [1, 1, 1]}[args.bg],
-            dtype=torch.float32,
-            device="cuda",
-        )
-    ]
+    # ── Mutable state (lists for closure capture) ───────────────────────────
+    _bg_ptr = [torch.tensor(
+        {"white": [1, 1, 1], "black": [0, 0, 0], "random": [1, 1, 1]}[args.bg],
+        dtype=torch.float32, device="cuda",
+    )]
     _scale_mod = [1.0]
-    _mode = ["RGB"]  # "RGB" or "DINO"
+    _mode = ["RGB"]              # "RGB" or "DINO"
     # None or (gaussians, sh_degree, has_dino, dino_cmap, has_regions, has_primitives)
     _gs_state: list = [None]
     # Camera ring display: frustum handles for the loaded scene + visibility toggle.
@@ -426,42 +392,26 @@ def main():
     # Crop viewport state
     _crop_enabled = [False]
     _crop_center = [0.0, 0.0, 0.0]
-    _crop_scale = [
-        1.0,
-        1.0,
-        1.0,
-    ]  # full extent along each box-local axis (OrientedBox.S semantics)
-    _crop_follow_orbit = [
-        True
-    ]  # keep crop center synced to the Orbit Origin Tool (camera look-at) position
-    _crop_box_handle = None  # wireframe crop preview; recreated when the size changes (scale is one-shot)
-    _crop_box_cache = [None]  # cached OrientedBox handed to the renderer
-    _last_crop_scale = [
-        None
-    ]  # last pushed box size, to detect changes (see _crop_commit)
-    _crop_initialized = [
-        False
-    ]  # auto-fit the crop box to the first loaded scene (once)
-    _last_look_at = [None]  # last orbit-origin (axes) position, to detect axes movement
-    _crop_rpy = [
-        math.pi / 2,
-        0.0,
-        0.0,
-    ]  # box rotation (radians); starts with local Y -> world +Z (viser's default up)
-    _crop_axes_up = [
-        None
-    ]  # last axes-up direction (== camera up); change -> rotate box to match
-    _crop_syncing = [False]  # guard against slider feedback loops
-    _scene_xyz = [None]  # current scene gaussian positions (for adaptive slider ranges)
+    _crop_scale = [1.0, 1.0, 1.0]  # full extent along each box-local axis (OrientedBox.S semantics)
+    _crop_follow_orbit = [True]    # keep crop center synced to the Orbit Origin Tool (camera look-at) position
+    _crop_box_handle = None        # wireframe crop preview; recreated when the size changes (scale is one-shot)
+    _crop_box_cache = [None]       # cached OrientedBox handed to the renderer
+    _last_crop_scale = [None]      # last pushed box size, to detect changes (see _crop_commit)
+    _crop_initialized = [False]    # auto-fit the crop box to the first loaded scene (once)
+    _last_look_at = [None]         # last orbit-origin (axes) position, to detect axes movement
+    _crop_rpy = [math.pi / 2, 0.0, 0.0]  # box rotation (radians); starts with local Y -> world +Z (viser's default up)
+    _crop_axes_up = [None]         # last axes-up direction (== camera up); change -> rotate box to match
+    _crop_syncing = [False]        # guard against slider feedback loops
+    _scene_xyz = [None]            # current scene gaussian positions (for adaptive slider ranges)
 
     # Dummy pipeline with just the antialiasing flag (render() needs a `pipe` arg).
     class _Pipe:
         convert_SHs_python = False
         debug = False
         antialiasing = args.antialiasing
-
     pipe = _Pipe()
 
+    # ── Camera ring display (migrated from nerfstudio viewer) ──────────────
     def _set_camera_display(model_path: Path):
         """(Re)create camera frustums with GT images for the loaded scene."""
         for h in _cam_handles:
@@ -472,13 +422,8 @@ def main():
         _cam_handles.clear()
         for c in _load_cameras(model_path, _cam_config):
             h = server.scene.add_camera_frustum(
-                name=c["name"],
-                fov=c["fov"],
-                aspect=c["aspect"],
-                scale=c["scale"],
-                image=c["image"],
-                wxyz=c["wxyz"],
-                position=c["position"],
+                name=c["name"], fov=c["fov"], aspect=c["aspect"], scale=c["scale"],
+                image=c["image"], wxyz=c["wxyz"], position=c["position"],
                 visible=_cams_visible[0],
             )
 
@@ -489,33 +434,24 @@ def main():
                     with event.client.atomic():
                         event.client.camera.position = event.target.position
                         event.client.camera.wxyz = event.target.wxyz
-
                 return _on_click
-
             h.on_click(_make_on_click(c["idx"]))
 
             _cam_handles.append(h)
         if _cam_handles:
             print(f"  + {len(_cam_handles)} cameras with GT on frustums (/cameras)")
 
+    # ── Initial load from CLI args (if provided) ────────────────────────────
     if args.model_path is not None:
         print(f"Loading scene from {args.model_path} …")
-        gaussians, sh_degree, has_dino, has_regions, has_primitives = _load_gaussians(
-            args.model_path, args.iteration
-        )
+        gaussians, sh_degree, has_dino, has_regions, has_primitives = _load_gaussians(args.model_path, args.iteration)
         dino_cmap = _build_dino_colormap(gaussians) if has_dino else None
-        _gs_state[0] = (
-            gaussians,
-            sh_degree,
-            has_dino,
-            dino_cmap,
-            has_regions,
-            has_primitives,
-        )
+        _gs_state[0] = (gaussians, sh_degree, has_dino, dino_cmap, has_regions, has_primitives)
         _scene_xyz[0] = gaussians.get_xyz
         print(f"  {gaussians.get_xyz.shape[0]:,} gaussians  |  SH degree {sh_degree}")
         _set_camera_display(args.model_path)
 
+    # ── Render fn ───────────────────────────────────────────────────────────
     def render_fn(camera_state, render_tab_state):
         W = int(render_tab_state.viewer_width)
         H = int(render_tab_state.viewer_height)
@@ -540,17 +476,13 @@ def main():
 
         with torch.no_grad():
             if _mode[0] == "DINO" and dino_cmap is not None:
-                feat = render_features(
-                    cam, gaussians, gaussians.get_dino_features, crop_box=_crop_box
-                )  # [D, H, W]
+                feat = render_features(cam, gaussians, gaussians.get_dino_features, crop_box=_crop_box)  # [D, H, W]
                 mean, proj, lo, hi = dino_cmap
-                proj_map = (feat.permute(1, 2, 0) - mean) @ proj  # [H, W, 3]
-                rgb = (
-                    ((proj_map - lo) / (hi - lo).clamp_min(1e-8))
-                    .clamp(0, 1)
-                    .permute(2, 0, 1)
-                )
+                proj_map = (feat.permute(1, 2, 0) - mean) @ proj                     # [H, W, 3]
+                rgb = ((proj_map - lo) / (hi - lo).clamp_min(1e-8)).clamp(0, 1).permute(2, 0, 1)
             elif _mode[0] == "Region" and (has_regions or has_primitives):
+                # 优先使用 primitive_labels (⑤ FGW 分配结果), 回退到 cluster_labels (④ 聚类结果).
+                # primitive_labels: 每个高斯的风格基元下标 0..K-1; cluster_labels: 区域下标 0..R-1.
                 labels = getattr(gaussians, "primitive_labels", None)
                 if labels is None:
                     labels = getattr(gaussians, "cluster_labels", None)
@@ -564,49 +496,35 @@ def main():
                     if valid.any() and K > 0:
                         colors[valid] = cmap[labels[valid].clamp(min=0) % K]
                     rgb = render(
-                        cam,
-                        gaussians,
-                        pipe,
-                        _bg_ptr[0],
-                        scaling_modifier=_scale_mod[0],
-                        override_color=colors,
-                        crop_box=_crop_box,
+                        cam, gaussians, pipe, _bg_ptr[0],
+                        scaling_modifier=_scale_mod[0], override_color=colors, crop_box=_crop_box,
                     )["render"]
                 else:
                     rgb = render(
-                        cam,
-                        gaussians,
-                        pipe,
-                        _bg_ptr[0],
-                        scaling_modifier=_scale_mod[0],
-                        crop_box=_crop_box,
+                        cam, gaussians, pipe, _bg_ptr[0],
+                        scaling_modifier=_scale_mod[0], crop_box=_crop_box,
                     )["render"]
             else:
                 rgb = render(
-                    cam,
-                    gaussians,
-                    pipe,
-                    _bg_ptr[0],
-                    scaling_modifier=_scale_mod[0],
-                    crop_box=_crop_box,
+                    cam, gaussians, pipe, _bg_ptr[0],
+                    scaling_modifier=_scale_mod[0], crop_box=_crop_box,
                 )["render"]
-        return (
-            (rgb.clamp(0, 1) * 255).byte().permute(1, 2, 0).contiguous().cpu().numpy()
-        )
+        return (rgb.clamp(0, 1) * 255).byte().permute(1, 2, 0).contiguous().cpu().numpy()
 
     viewer = nerfview.Viewer(
-        server=server,
-        render_fn=render_fn,
-        mode="rendering",
+        server=server, render_fn=render_fn, mode="rendering",
     )
 
+    # ═════════════════════════════════════════════════════════════════════════
     #  Scene Browser UI
+    # ═════════════════════════════════════════════════════════════════════════
 
     _BASE_PLACEHOLDER = "(enter base path)"
     _SCENE_PLACEHOLDER = "(select scene)"
     _ITER_PLACEHOLDER = "(select iteration)"
 
-    with server.gui.add_folder("\U0001f4c1 Scene Browser", order=-2.0):
+    with server.gui.add_folder("\U0001F4C1 Scene Browser", order=-2.0):
+
         base_text = server.gui.add_text(
             "Base path",
             initial_value=args.base_path or "",
@@ -633,11 +551,12 @@ def main():
             "Status",
             initial_value=(
                 f"Loaded: {_gs_state[0][0].get_xyz.shape[0]:,} gaussians"
-                if _gs_state[0] is not None
-                else "No scene loaded"
+                if _gs_state[0] is not None else "No scene loaded"
             ),
             disabled=True,
         )
+
+    # ── Browser callbacks ───────────────────────────────────────────────────
 
     def _refresh_scenes():
         bp = Path(base_text.value)
@@ -688,18 +607,9 @@ def main():
 
         try:
             print(f"Loading scene from {model_path} (iteration={it}) …")
-            gaussians, sh_degree, has_dino, has_regions, has_primitives = (
-                _load_gaussians(model_path, iter_num)
-            )
+            gaussians, sh_degree, has_dino, has_regions, has_primitives = _load_gaussians(model_path, iter_num)
             dino_cmap = _build_dino_colormap(gaussians) if has_dino else None
-            _gs_state[0] = (
-                gaussians,
-                sh_degree,
-                has_dino,
-                dino_cmap,
-                has_regions,
-                has_primitives,
-            )
+            _gs_state[0] = (gaussians, sh_degree, has_dino, dino_cmap, has_regions, has_primitives)
             _scene_xyz[0] = gaussians.get_xyz
             _update_crop_ranges(gaussians.get_xyz)
             n_gs = gaussians.get_xyz.shape[0]
@@ -730,7 +640,9 @@ def main():
     if args.model_path is None and args.base_path:
         _refresh_scenes()
 
+    # ═════════════════════════════════════════════════════════════════════════
     #  Controls UI
+    # ═════════════════════════════════════════════════════════════════════════
 
     with server.gui.add_folder("Controls", order=-1.0):
         # Camera ring visibility toggle (Hide/Show pair, like nerfstudio's header buttons).
@@ -754,20 +666,15 @@ def main():
             initial_value="RGB",
             hint="RGB = SH colours; DINO = distilled semantic features (PCA→RGB); Region = FGW primitive assignment (fallback: structural clusters).",
         )
-
         @mode_dropdown.on_update
         def _(evt):
             _mode[0] = mode_dropdown.value
 
         scale_slider = server.gui.add_slider(
             "Scaling modifier",
-            min=0.0,
-            max=2.0,
-            step=0.01,
-            initial_value=1.0,
+            min=0.0, max=2.0, step=0.01, initial_value=1.0,
             hint="Scale all gaussians (0=collapsed, 1=trained, >1=enlarged).",
         )
-
         @scale_slider.on_update
         def _(evt):
             _scale_mod[0] = float(scale_slider.value)
@@ -778,13 +685,11 @@ def main():
             initial_value=args.bg,
             hint="Rendering background colour.",
         )
-
         @bg_dropdown.on_update
         def _(evt):
             choice = bg_dropdown.value
             if choice == "random":
                 import random as _rnd
-
                 c = [_rnd.random(), _rnd.random(), _rnd.random()]
             else:
                 c = [1, 1, 1] if choice == "white" else [0, 0, 0]
@@ -796,7 +701,6 @@ def main():
             initial_value=f"{args.width}×{args.height}",
             hint="Viewport resolution (higher = sharper but slower).",
         )
-
         @viewport_res.on_update
         def _(evt):
             val = viewport_res.value
@@ -807,7 +711,9 @@ def main():
                 viewer.render_tab_state.viewer_height = h
                 viewer.rerender(None)
 
+    # ═════════════════════════════════════════════════════════════════════════
     #  Crop Viewport (bounding box oriented to the Orbit Origin Tool's axes)
+    # ═════════════════════════════════════════════════════════════════════════
 
     from viser.transforms import SO3 as _SO3
 
@@ -844,8 +750,7 @@ def main():
             _last_crop_scale[0] = tuple(_crop_scale)
         _crop_box_cache[0] = (
             OrientedBox.from_params(_crop_center, _crop_rpy, _crop_scale)
-            if _crop_enabled[0]
-            else None
+            if _crop_enabled[0] else None
         )
         _crop_rerender()
 
@@ -854,7 +759,7 @@ def main():
         return server.scene.add_box(
             "Crop Box",
             color=(255, 165, 0),
-            dimensions=(1.0, 1.0, 1.0),  # unit box; the "Size" sliders drive `scale`
+            dimensions=(1.0, 1.0, 1.0),          # unit box; the "Size" sliders drive `scale`
             scale=tuple(max(s, 1e-4) for s in _crop_scale),
             wireframe=True,
             opacity=1.0,
@@ -896,7 +801,6 @@ def main():
         whenever the tool's Y axis (the camera up, shown by the arrow) rotates,
         the box rotates by the same minimal rotation so its up always matches
         the arrow's up. Center follows the axes' position (== look-at)."""
-
         @client.camera.on_update
         def _(camera):
             if _crop_syncing[0]:
@@ -972,7 +876,7 @@ def main():
         @crop_enable_cb.on_update
         def _(evt):
             _crop_enabled[0] = crop_enable_cb.value
-            _last_crop_scale[0] = None  # (re)create the wireframe box on toggle
+            _last_crop_scale[0] = None   # (re)create the wireframe box on toggle
             _crop_commit()
 
         crop_follow_cb = server.gui.add_checkbox(
@@ -988,31 +892,19 @@ def main():
             if _crop_follow_orbit[0]:
                 clients = server.get_clients()
                 if clients:
-                    look_at = np.asarray(
-                        next(iter(clients.values())).camera.look_at, dtype=np.float64
-                    )
+                    look_at = np.asarray(next(iter(clients.values())).camera.look_at, dtype=np.float64)
                     _last_look_at[0] = look_at.copy()
                     _sync_crop_to_orbit(look_at)
                     _crop_commit()
 
-        crop_center_x = server.gui.add_slider(
-            "Center X", min=-5.0, max=5.0, step=0.01, initial_value=0.0
-        )
-        crop_center_y = server.gui.add_slider(
-            "Center Y", min=-5.0, max=5.0, step=0.01, initial_value=0.0
-        )
-        crop_center_z = server.gui.add_slider(
-            "Center Z", min=-5.0, max=5.0, step=0.01, initial_value=0.0
-        )
+        crop_center_x = server.gui.add_slider("Center X", min=-5.0, max=5.0, step=0.01, initial_value=0.0)
+        crop_center_y = server.gui.add_slider("Center Y", min=-5.0, max=5.0, step=0.01, initial_value=0.0)
+        crop_center_z = server.gui.add_slider("Center Z", min=-5.0, max=5.0, step=0.01, initial_value=0.0)
 
         def _on_center_update(*_):
             if _crop_syncing[0]:
                 return
-            _crop_center[:] = (
-                crop_center_x.value,
-                crop_center_y.value,
-                crop_center_z.value,
-            )
+            _crop_center[:] = (crop_center_x.value, crop_center_y.value, crop_center_z.value)
             _crop_commit()
 
         crop_center_x.on_update(_on_center_update)
@@ -1022,27 +914,15 @@ def main():
         # Size sliders: FULL extent along each box-local axis (matches the renderer's
         # hard crop: points with |local| < size/2 survive).
         crop_sx = server.gui.add_slider(
-            "Size X",
-            min=0.0,
-            max=10.0,
-            step=0.01,
-            initial_value=1.0,
+            "Size X", min=0.0, max=10.0, step=0.01, initial_value=1.0,
             hint="Full extent along the box's local X axis.",
         )
         crop_sy = server.gui.add_slider(
-            "Size Y",
-            min=0.0,
-            max=10.0,
-            step=0.01,
-            initial_value=1.0,
+            "Size Y", min=0.0, max=10.0, step=0.01, initial_value=1.0,
             hint="Full extent along the box's local Y axis.",
         )
         crop_sz = server.gui.add_slider(
-            "Size Z",
-            min=0.0,
-            max=10.0,
-            step=0.01,
-            initial_value=1.0,
+            "Size Z", min=0.0, max=10.0, step=0.01, initial_value=1.0,
             hint="Full extent along the box's local Z axis.",
         )
 
@@ -1065,11 +945,7 @@ def main():
                 return
             lo = xyz.detach().float().min(dim=0).values.cpu().numpy()
             hi = xyz.detach().float().max(dim=0).values.cpu().numpy()
-            _crop_center[:] = (
-                float(0.5 * (lo[0] + hi[0])),
-                float(0.5 * (lo[1] + hi[1])),
-                float(0.5 * (lo[2] + hi[2])),
-            )
+            _crop_center[:] = (float(0.5 * (lo[0] + hi[0])), float(0.5 * (lo[1] + hi[1])), float(0.5 * (lo[2] + hi[2])))
             _crop_scale[:] = tuple(max(float(hi[i] - lo[i]), 1e-3) for i in range(3))
             _sync_crop_sliders()
             _crop_commit()
@@ -1086,8 +962,7 @@ def main():
         margin = 0.05 * extent + 1e-3
         for sl, l, h in zip(
             (crop_center_x, crop_center_y, crop_center_z),
-            lo - margin,
-            hi + margin,
+            lo - margin, hi + margin,
         ):
             sl.min = float(l)
             sl.max = float(h)
@@ -1101,18 +976,12 @@ def main():
             # First scene: wrap the crop around the whole point cloud.
             _crop_initialized[0] = True
             _crop_center[:] = (
-                float(0.5 * (lo[0] + hi[0])),
-                float(0.5 * (lo[1] + hi[1])),
-                float(0.5 * (lo[2] + hi[2])),
+                float(0.5 * (lo[0] + hi[0])), float(0.5 * (lo[1] + hi[1])), float(0.5 * (lo[2] + hi[2])),
             )
             _crop_scale[:] = tuple(max(float(hi[i] - lo[i]), 1e-3) for i in range(3))
         else:
             # Keep internal state consistent with any clamped slider values.
-            _crop_center[:] = (
-                crop_center_x.value,
-                crop_center_y.value,
-                crop_center_z.value,
-            )
+            _crop_center[:] = (crop_center_x.value, crop_center_y.value, crop_center_z.value)
             _crop_scale[:] = (crop_sx.value, crop_sy.value, crop_sz.value)
         _sync_crop_sliders()
         _crop_commit()
@@ -1126,18 +995,18 @@ def main():
     gs_info = ""
     if _gs_state[0] is not None:
         gs_info = f"  {_gs_state[0][0].get_xyz.shape[0]:,} gaussians  |  SH degree {_gs_state[0][1]}"
-    print(f"\n{'=' * 60}")
+    print(f"\n{'='*60}")
     print(f"  Viewer ready: http://{args.host}:{args.port}")
     if gs_info:
         print(gs_info)
     else:
-        print("  Use the Scene Browser panel to select and load a scene")
-    print("  Press Ctrl+C to exit")
-    print(f"{'=' * 60}\n")
+        print(f"  Use the Scene Browser panel to select and load a scene")
+    print(f"  Press Ctrl+C to exit")
+    print(f"{'='*60}\n")
 
+    # ── Idle loop ──────────────────────────────────────────────────────────
     signal.signal(signal.SIGINT, lambda *_: sys.exit(0))
     import time
-
     try:
         while True:
             time.sleep(1.0)

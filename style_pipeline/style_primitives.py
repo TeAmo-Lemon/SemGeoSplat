@@ -5,6 +5,7 @@ DINOv3 在本阶段加载一次 (② 蒸馏用磁盘缓存, 不需模型), 用�
 prototypes 常驻 gaussians.style_primitives (GPU), 同时写 sidecar style_primitives.pt.
 """
 
+import hashlib
 import os
 from pathlib import Path
 
@@ -48,58 +49,116 @@ def _decompose_style_primitives(dataset, gaussians, style):
         return
     if not os.path.isfile(style.style_image):
         raise FileNotFoundError(f"[style] --style_image not found: {style.style_image}")
+    image_hash = hashlib.sha256(Path(style.style_image).read_bytes()).hexdigest()
 
-    from semgeo_utils.dino_features import (
-        _load_and_preprocess_image,
-        _extract_patch_features,
-        _load_dinov3,
-    )
+    reference_path = str(
+        getattr(style, "style_primitives_reference_path", "")).strip()
+    if reference_path:
+        if not os.path.isfile(reference_path):
+            raise FileNotFoundError(
+                f"[style] --style_primitives_reference_path not found: {reference_path}")
+        try:
+            payload = torch.load(
+                reference_path, map_location="cpu", weights_only=False)
+        except TypeError:  # 兼容较旧的 PyTorch
+            payload = torch.load(reference_path, map_location="cpu")
+        prototypes = payload.get("prototypes")
+        patch_assignments = payload.get("patch_assignments")
+        patch_hw = tuple(payload.get("patch_hw", ()))
+        patch_size = int(payload.get("patch_size", 0))
+        patch_features = payload.get("patch_features")
+        if not torch.is_tensor(prototypes) or prototypes.ndim != 2:
+            raise ValueError(f"[style] invalid reference prototypes: {reference_path}")
+        if int(prototypes.shape[0]) != int(style.style_primitive_k):
+            raise ValueError(
+                f"[style] reference K={prototypes.shape[0]} != configured "
+                f"{style.style_primitive_k}: {reference_path}")
+        if (not torch.is_tensor(patch_assignments)
+                or len(patch_hw) != 2 or patch_size < 1
+                or patch_assignments.numel() != int(patch_hw[0]) * int(patch_hw[1])):
+            raise ValueError(
+                f"[style] invalid reference patch assignments: {reference_path}")
+        if patch_features is not None and (
+                not torch.is_tensor(patch_features)
+                or patch_features.shape != (patch_assignments.numel(), prototypes.shape[1])):
+            raise ValueError(f"[style] invalid reference patch features: {reference_path}")
+        stored_hash = payload.get("style_image_sha256")
+        if stored_hash and stored_hash != image_hash:
+            raise ValueError(f"[style] cached patches belong to a different reference image: {reference_path}")
+        if payload.get("dino_model", style.dino_model) != style.dino_model:
+            raise ValueError(f"[style] cached patches use a different DINO model: {reference_path}")
+
+        target_device = (gaussians.get_xyz.device
+                         if torch.is_tensor(getattr(gaussians, "get_xyz", None))
+                         else torch.device("cuda"))
+        gaussians.style_primitives = (
+            prototypes.float().to(target_device).contiguous())
+        gaussians.style_patch_assignments = patch_assignments.long().cpu()
+        gaussians.style_patch_hw = patch_hw
+        gaussians.style_patch_size = patch_size
+        gaussians.style_preprocess_max_size = payload.get("preprocess_max_size", style.style_primitive_size)
+        gaussians.style_patch_features = patch_features
+        gaussians.style_patch_valid_mask = payload.get("patch_valid_mask")
+        output_payload = dict(payload)
+        output_payload["reference_path"] = os.path.abspath(reference_path)
+        output_payload["reference_mode"] = "exact_full_reuse"
+        sidecar = sidecar_path(
+            dataset.model_path, style.style_iterations, "style_primitives.pt")
+        os.makedirs(os.path.dirname(sidecar), exist_ok=True)
+        torch.save(output_payload, sidecar)
+        print(f"[style] Reused {prototypes.shape[0]} exact Full style primitives "
+              f"from {reference_path} -> {sidecar} (kept on {target_device})")
+        return
+
+    from scripts.extract_dino_features import (
+        _load_and_preprocess_image, _extract_patch_features, _load_dinov3)
 
     device = torch.device("cuda")
     model, patch_size = _load_dinov3(device, style.dino_model)
     try:
         image_tensor, _, patch_hw = _load_and_preprocess_image(
-            Path(style.style_image),
-            patch_size=patch_size,
-            device=device,
-            max_size=style.style_primitive_size,
-        )
-        feats = _extract_patch_features(
-            model, image_tensor, patch_hw
-        )  # [C, ph, pw], C = hidden_size
-        feat_dim = feats.shape[0]
-        feats = feats.reshape(feat_dim, -1).permute(1, 0)  # [N, C]
-        feats = F.normalize(feats, dim=1)
+            Path(style.style_image), patch_size=patch_size, device=device,
+            max_size=style.style_primitive_size)
+        token_map = _extract_patch_features(model, image_tensor, patch_hw)  # [C, ph, pw]
+        raw_tokens = token_map.flatten(1).T                           # [N, C]
+        feats = F.normalize(raw_tokens, dim=1)
         prototypes = _kmeans_pytorch(
-            feats, style.style_primitive_k, style.style_primitive_iters, device
-        )
-        prototypes = F.normalize(prototypes, dim=1)  # [K, C]
-
-        patch_assignments = torch.cdist(feats, prototypes).argmin(dim=1)  # [N_patches]
+            feats, style.style_primitive_k, style.style_primitive_iters, device)
+        prototypes = F.normalize(prototypes, dim=1)                    # [K, C]
+        # 每个 patch 到最近 prototype 的聚类指派. ⑥ 用它把风格图按基元分段, 进而为
+        # 每个基元建 VGG-NNFM 风格特征库 (与 ⑤ 的区域→基元映射对齐). feats 与 patch_hw
+        # 来自同一张图同一预处理, 故 patch 网格与后续 VGG 特征精确对齐 (DINO/VGG 共用
+        # ImageNet 归一化, _load_and_preprocess_image 的张量可直接喂 VGG).
+        patch_assignments = torch.cdist(feats, prototypes).argmin(dim=1)   # [N_patches]
     finally:
         del model
         torch.cuda.empty_cache()
 
     gaussians.style_primitives = prototypes.contiguous()
-
+    # 暂存 patch 指派供 ⑥ 直接取用 (同进程内 ⑥ 紧接 ③ 运行); 同时落盘供独立复用.
+    # patch_size 一起存, ⑥ 重新预处理同一张风格图时必须用同一 patch_size 才能与 patch
+    # 网格对齐 (patch_hw = resized_H/patch_size).
     gaussians.style_patch_assignments = patch_assignments.detach().cpu()
     gaussians.style_patch_hw = patch_hw
     gaussians.style_patch_size = patch_size
+    gaussians.style_preprocess_max_size = style.style_primitive_size
+    # Transport matches in the scene PCA space fitted on raw tokens, while
+    # the appearance banks retain the normalized-token K-Means assignment.
+    gaussians.style_patch_features = raw_tokens.detach().float().cpu().contiguous()
+    gaussians.style_patch_valid_mask = None
     sidecar = sidecar_path(
-        dataset.model_path, style.style_iterations, "style_primitives.pt"
-    )
+        dataset.model_path, style.style_iterations, "style_primitives.pt")
     os.makedirs(os.path.dirname(sidecar), exist_ok=True)
-    torch.save(
-        {
-            "prototypes": prototypes.cpu(),
-            "k": int(prototypes.shape[0]),
-            "patch_assignments": patch_assignments.detach().cpu(),
-            "patch_hw": tuple(patch_hw),
-            "patch_size": int(patch_size),
-        },
-        sidecar,
-    )
-    print(
-        f"[style] Decomposed {prototypes.shape[0]} style primitives "
-        f"from {style.style_image} -> {sidecar} (kept on GPU)"
-    )
+    torch.save({
+        "prototypes": prototypes.cpu(),
+        "k": int(prototypes.shape[0]),
+        "patch_assignments": patch_assignments.detach().cpu(),
+        "patch_hw": tuple(patch_hw),
+        "patch_size": int(patch_size),
+        "patch_features": gaussians.style_patch_features,
+        "style_image_sha256": image_hash,
+        "dino_model": style.dino_model,
+        "preprocess_max_size": int(style.style_primitive_size),
+    }, sidecar)
+    print(f"[style] Decomposed {prototypes.shape[0]} style primitives "
+          f"from {style.style_image} -> {sidecar} (kept on GPU)")

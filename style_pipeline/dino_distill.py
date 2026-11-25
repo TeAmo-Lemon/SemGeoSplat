@@ -1,5 +1,16 @@
-"""Distill cached image features into per-Gaussian semantic features."""
+"""② DINO 蒸馏: 冻结几何+SH, 给每个高斯蒸馏一个 per-gaussian DINO 特征.
 
+GT 来自磁盘缓存 (DINOv3 GT 提取由 <refine_dir>/dino_features.pt 缓存, 命中则用,
+缺失才调 scripts/extract_dino_features.py 现场提取). per-gaussian 结果作为
+sidecar dino_features_gaussian.pt 落盘到 <refine_dir>/ (与 refine 后的 ply + GT 缓存同级,
+跨 style/style_iterations 复用: per-gaussian 特征跟几何绑, 几何不变就该复用); 文件名带
+"_gaussian" 后缀与同目录的 per-image GT (dino_features.pt) 区分. 内存中 _dino_features
+常驻供 ④⑥ 取用.
+
+_resolve_dino_paths 为 ④⑤ 共用 (解析 GT 缓存路径 + 图像目录).
+"""
+
+import hashlib
 import os
 from pathlib import Path
 from random import randint
@@ -15,17 +26,25 @@ from semgeo_utils.loss_utils import l1_loss
 from .refine import _resolve_start_ply, _resolve_refine_dir
 
 
-def _resolve_dino_paths(dataset, style):
+def _pca_fingerprint(state):
+    """Identify the feature basis independently of the path of the DINO cache."""
+    digest = hashlib.sha256()
+    for key in ("components", "mean"):
+        value = state[key].detach().cpu().float().contiguous()
+        digest.update(str(tuple(value.shape)).encode("ascii"))
+        digest.update(value.numpy().tobytes())
+    return digest.hexdigest()
 
+
+def _resolve_dino_paths(dataset, style):
+    # GT 缓存 (per-image DINOv3+PCA) 与图片一一对应、跨风格化运行不变, 故放在
+    # --start_ply 同树的 iteration_refine/ 下 (与 refine 后的 ply 同目录), 复用.
+    # --dino_features_path 显式覆盖时以用户指定为准.
     if style.dino_features_path:
         gt_path = style.dino_features_path
     else:
-        gt_path = os.path.join(
-            _resolve_refine_dir(_resolve_start_ply(style)), "dino_features.pt"
-        )
-    image_dir = style.dino_image_dir or os.path.join(
-        dataset.source_path, dataset.images or "images"
-    )
+        gt_path = os.path.join(_resolve_refine_dir(_resolve_start_ply(style)), "dino_features.pt")
+    image_dir = style.dino_image_dir or os.path.join(dataset.source_path, dataset.images or "images")
     return gt_path, image_dir
 
 
@@ -39,9 +58,7 @@ def _ensure_gt_dino_features(dataset, style):
     """
     gt_path, image_dir = _resolve_dino_paths(dataset, style)
     if style.force_dino and os.path.isfile(gt_path):
-        print(
-            f"[dino] --force_dino set, deleting cached GT features {gt_path} for full re-extraction"
-        )
+        print(f"[dino] --force_dino set, deleting cached GT features {gt_path} for full re-extraction")
         os.remove(gt_path)
     if os.path.isfile(gt_path):
         print(f"[dino] Using existing GT features: {gt_path}")
@@ -50,32 +67,21 @@ def _ensure_gt_dino_features(dataset, style):
     if not os.path.isdir(image_dir):
         raise FileNotFoundError(
             f"[dino] GT features '{gt_path}' missing and image dir '{image_dir}' not found. "
-            f"Set --dino_image_dir to a directory containing the scene images."
-        )
+            f"Set --dino_image_dir or pre-run scripts/extract_dino_features.py.")
 
-    print(
-        f"[dino] GT features not found; extracting DINOv3 features from {image_dir} ..."
-    )
-    from semgeo_utils.dino_features import (
-        extract_dino_features_for_images,
-        _list_images,
-    )
-
-    image_paths = _list_images(
-        Path(image_dir), [".jpg", ".jpeg", ".png", ".bmp", ".webp"]
-    )
+    print(f"[dino] GT features not found; extracting DINOv3 features from {image_dir} ...")
+    from scripts.extract_dino_features import extract_dino_features_for_images, _list_images
+    image_paths = _list_images(Path(image_dir), [".jpg", ".jpeg", ".png", ".bmp", ".webp"])
     if len(image_paths) == 0:
         raise RuntimeError(f"[dino] No images found in {image_dir}")
     extract_dino_features_for_images(
         image_paths=image_paths,
         input_dir=Path(image_dir),
-        output_dir=Path(gt_path),  # .pt suffix -> written verbatim
+        output_dir=Path(gt_path),      # .pt suffix -> written verbatim
         feature_dim=style.dino_feature_dim,
         device="cuda",
         skip_existing=True,
-        max_image_size=style.dino_max_image_size
-        if style.dino_max_image_size > 0
-        else None,
+        max_image_size=style.dino_max_image_size if style.dino_max_image_size > 0 else None,
         model_id=style.dino_model,
     )
     return gt_path
@@ -93,8 +99,7 @@ def _load_gt_dino_index(gt_path, feature_dim):
     stored_dim = payload.get("feature_dim", None)
     if stored_dim is not None and stored_dim != feature_dim:
         raise ValueError(
-            f"[dino] GT feature dim {stored_dim} != --dino_feature_dim {feature_dim}"
-        )
+            f"[dino] GT feature dim {stored_dim} != --dino_feature_dim {feature_dim}")
     by_relpath, by_stem, ambiguous = {}, {}, set()
     for key, tensor in payload["features"].items():
         by_relpath[Path(key).with_suffix("").as_posix()] = tensor
@@ -118,93 +123,78 @@ def _lookup_gt_feature(gt_index, image_name):
     if stem in ambiguous:
         raise KeyError(
             f"[dino] image '{image_name}' matches ambiguous stem '{stem}' across "
-            f"subdirectories; GT keys and camera names disagree on the path prefix"
-        )
+            f"subdirectories; GT keys and camera names disagree on the path prefix")
     return by_stem.get(stem, None)
 
 
 def distill_dino(dataset, gaussians: GaussianModel, scene: Scene, style):
-    """Freeze geometry and colors, then fit per-Gaussian features to cached image features. Reuse a sidecar only when its shape and geometry fingerprint match."""
+    """Freeze geometry+SH and distill a per-Gaussian DINO feature via feature L1.
+
+    Result is saved as a sidecar `dino_features_gaussian.pt` in the refine dir
+    (<start_ply 树>/point_cloud/iteration_refine/, 与 refine 后 ply + GT 缓存同级) so
+    it survives across style images / style_iterations: per-gaussian features are
+    bound to the geometry only, not to the style image. load_dino_sidecar validates
+    the point count + xyz fingerprint, so if geometry changed (refine was re-run)
+    the load fails and we fall through to re-distill.
+
+    The ply stays standard-3DGS.
+    """
     if style.dino_distill_iterations <= 0:
         print("[dino] dino_distill_iterations <= 0; skipping DINO stage")
         return
 
     n_points = gaussians.get_xyz.shape[0]
-
+    # per-gaussian 特征与几何绑定 (与风格图无关), 落盘到 refine 目录跨 style/style_iterations
+    # 复用; 文件名带 _gaussian 后缀, 与同目录 per-image GT 缓存 (dino_features.pt) 区分.
     sidecar = os.path.join(
-        _resolve_refine_dir(_resolve_start_ply(style)), "dino_features_gaussian.pt"
-    )
+        _resolve_refine_dir(_resolve_start_ply(style)), "dino_features_gaussian.pt")
 
+    # 如果 per-gaussian sidecar 已存在且未强制重提, 尝试直接加载.
+    # load_dino_sidecar 校验点数 + xyz 指纹: 几何未变 (含跨 style) → 加载成功跳过蒸馏;
+    # 几何已变 (refine 重跑) → 校验失败 → 走正常蒸馏流程.
     if os.path.isfile(sidecar):
         if not style.force_dino:
             try:
-                gaussians.load_dino_sidecar(
-                    sidecar, expected_dim=style.dino_feature_dim
-                )
-                print(
-                    f"[dino] Loaded cached per-gaussian DINO features from {sidecar} "
-                    f"({n_points} pts, {style.dino_feature_dim}D); skipping distillation."
-                )
+                gaussians.load_dino_sidecar(sidecar, expected_dim=style.dino_feature_dim)
+                print(f"[dino] Loaded cached per-gaussian DINO features from {sidecar} "
+                      f"({n_points} pts, {style.dino_feature_dim}D); skipping distillation.")
                 return
             except Exception as exc:
                 print(f"[dino] Cached sidecar invalid ({exc}); re-distilling.")
         else:
-            print(
-                f"[dino] --force_dino set, deleting cached per-gaussian sidecar {sidecar}"
-            )
+            print(f"[dino] --force_dino set, deleting cached per-gaussian sidecar {sidecar}")
             os.remove(sidecar)
 
+    # GT 2D DINO 特征缓存 (iteration_refine/dino_features.pt): 跨风格化运行复用.
+    # --force_dino 会删掉 GT 缓存, 强制重提所有图 + 重拟合 PCA.
     gt_path = _ensure_gt_dino_features(dataset, style)
     gt_index = _load_gt_dino_index(gt_path, style.dino_feature_dim)
 
     # Freeze everything but the new DINO features.
-    for p in (
-        gaussians._xyz,
-        gaussians._features_dc,
-        gaussians._features_rest,
-        gaussians._opacity,
-        gaussians._scaling,
-        gaussians._rotation,
-    ):
+    for p in (gaussians._xyz, gaussians._features_dc, gaussians._features_rest,
+              gaussians._opacity, gaussians._scaling, gaussians._rotation):
         p.requires_grad_(False)
     gaussians.dino_training_setup(
-        style.dino_lr,
-        style.dino_feature_dim,
-        dino_lr_final=style.dino_lr_final,
-        max_steps=style.dino_distill_iterations,
-    )
+        style.dino_lr, style.dino_feature_dim,
+        dino_lr_final=style.dino_lr_final, max_steps=style.dino_distill_iterations)
 
     cameras = scene.getTrainCameras().copy()
-    missing = [
-        c.image_name
-        for c in cameras
-        if _lookup_gt_feature(gt_index, c.image_name) is None
-    ]
+    missing = [c.image_name for c in cameras if _lookup_gt_feature(gt_index, c.image_name) is None]
     if missing:
         raise KeyError(
             f"[dino] {len(missing)} training views have no GT DINO feature "
-            f"(e.g. {missing[:3]}). Ensure extraction covered {dataset.source_path}."
-        )
+            f"(e.g. {missing[:3]}). Ensure extraction covered {dataset.source_path}.")
 
     ema_loss = 0.0
     progress_bar = tqdm(range(style.dino_distill_iterations), desc="DINO distill")
     for iteration in range(1, style.dino_distill_iterations + 1):
         gaussians.update_dino_learning_rate(iteration)
         cam = cameras[randint(0, len(cameras) - 1)]
-        rendered = render_features(
-            cam, gaussians, gaussians.get_dino_features
-        )  # [D, H, W]
+        rendered = render_features(cam, gaussians, gaussians.get_dino_features)   # [D, H, W]
 
-        gt = (
-            _lookup_gt_feature(gt_index, cam.image_name)
-            .to("cuda")
-            .permute(2, 0, 1)
-            .unsqueeze(0)
-        )  # [1, D, H, W]
+        gt = _lookup_gt_feature(gt_index, cam.image_name).to("cuda").permute(2, 0, 1).unsqueeze(0)  # [1, D, H, W]
         if gt.shape[-2:] != rendered.shape[-2:]:
-            gt = F.interpolate(
-                gt, size=rendered.shape[-2:], mode="bilinear", align_corners=False
-            )
+            gt = F.interpolate(gt, size=rendered.shape[-2:], mode="bilinear", align_corners=False)
         gt = gt.squeeze(0)
 
         loss = style.dino_lambda * l1_loss(rendered, gt)
@@ -220,10 +210,9 @@ def distill_dino(dataset, gaussians: GaussianModel, scene: Scene, style):
     progress_bar.close()
 
     gaussians.save_dino_sidecar(sidecar)
-    print(
-        f"[dino] Saved DINO sidecar ({n_points} pts, {style.dino_feature_dim}D): {sidecar}"
-    )
+    print(f"[dino] Saved DINO sidecar ({n_points} pts, {style.dino_feature_dim}D): {sidecar}")
 
+    # 释放蒸馏优化器动量, 与 refine 尾部其它释放保持一致 (_dino_features 作为结果保留).
     if gaussians.dino_optimizer is not None:
         gaussians.dino_optimizer.state.clear()
         gaussians.dino_optimizer = None

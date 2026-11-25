@@ -3,56 +3,125 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f7f6f2">
-  <title>SemGeoSplat — 3D Scene Stylization</title>
-  <meta name="description" content="Explore SemGeoSplat's 3D scene stylization results: 12 selected results across 10 scenes, with original views and style references.">
-  <meta property="og:title" content="SemGeoSplat — 3D Scene Stylization">
-  <meta property="og:description" content="One scene, many artistic possibilities. Explore the SemGeo visual results gallery.">
-  <meta property="og:type" content="website">
-  <meta property="og:url" content="https://TeAmo-Lemon.github.io/SemGeoSplat/">
-  <meta property="og:image" content="https://TeAmo-Lemon.github.io/SemGeoSplat/assets/posters/orchids-3.jpg">
-  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css">
-  <script src="app.js" defer></script>
+  <meta name="description" content="SemGeoSplat. Scene stylization, regional texture controls, and novel views rendered from 3D Gaussians.">
+  <title>SemGeoSplat · Controllable 3D Gaussian stylization</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="site.css">
+  <script defer src="site.js"></script>
 </head>
 <body>
-  <a class="skip-link" href="#gallery">Skip to results</a>
-  <header class="site-header wrap">
-    <a class="brand" href="./" aria-label="SemGeoSplat home"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>SemGeoSplat</a>
-    <nav aria-label="Main navigation"><a href="#gallery">Results <span>↗</span></a><a href="#project">Project</a><a class="repo-link" href="https://github.com/TeAmo-Lemon/SemGeoSplat" target="_blank" rel="noopener">GitHub <span>↗</span></a></nav>
-  </header>
-  <main>
-    <section class="intro wrap" aria-labelledby="title">
-      <div class="eyebrow"><span class="live-dot"></span>3D GAUSSIAN SPLATTING <span class="eyebrow-divider">/</span> VISUAL RESULTS</div>
-      <div class="intro-row"><h1 id="title">A scene.<br><em>Many expressions.</em></h1><div class="intro-note"><p>3D scene stylization<br>with <strong>SemGeoSplat.</strong></p><p class="muted">Explore new perspectives on familiar scenes through a collection of artistic styles.</p><a class="text-link" href="#gallery">View selected results <span>↓</span></a></div></div>
-    </section>
-    <section class="showcase wrap" aria-label="Featured result">
-      <div class="showcase-grid">
-        <div class="feature-main media-surface">
-          <video id="hero-video" muted loop playsinline preload="metadata" poster="assets/posters/orchids-3.jpg" aria-label="SemGeo result: Orchids, style 3"><source src="assets/results/orchids-3/semgeo.mp4" type="video/mp4"></video>
-          <div class="media-label"><span class="live-dot"></span> SEMGEO RESULT</div>
-          <div class="feature-bottom"><span id="hero-caption">Orchids <span>/ Style 3</span></span><button id="hero-toggle" class="glass-button" type="button" aria-label="Play featured animation">Play ↗</button><button id="hero-expand" class="glass-button" type="button" aria-label="Open featured result in detail">View ↗</button></div>
-        </div>
-        <div class="feature-context">
-          <figure class="context-frame original-frame"><img id="hero-original" src="assets/posters/orchids-original.jpg" alt="Original Orchids scene" width="960" height="720"><figcaption><span>01</span> Original scene</figcaption></figure>
-          <figure class="context-frame style-frame"><img id="hero-style" src="assets/styles/3.jpg" alt="Style reference 3"><figcaption><span>02</span> Style reference <span id="hero-style-id">3</span></figcaption></figure>
-        </div>
+  <a class="skip" href="#main">Skip to results</a>
+  <header><nav class="wrap" aria-label="Project navigation">
+    <a class="wordmark" href="#main">SemGeoSplat</a>
+    <div class="navlinks"><a href="#scenes">Scenes</a><a href="#controls">FGW controls</a><a href="#orbit">Object orbit</a><a href="https://github.com/TeAmo-Lemon/SemGeoSplat">Code</a></div>
+  </nav></header>
+  <main class="wrap" id="main">
+    <div class="masthead">
+      <h1>SemGeoSplat</h1>
+      <p class="subtitle">Controllable 3D Gaussian stylization with semantic regions and fused Gromov–Wasserstein transport</p>
+    </div>
+    <section id="scenes" aria-labelledby="scenes-title">
+      <div class="section-head"><h2 id="scenes-title">Scene stylization</h2><button type="button" class="motion" hidden>Pause motion</button></div>
+      <div class="tabs" role="tablist" aria-label="Choose a scene" hidden>
+        <button type="button" role="tab" id="tab-kitchen" aria-controls="scene-kitchen" aria-selected="true">Kitchen</button>
+        <button type="button" role="tab" id="tab-bonsai" aria-controls="scene-bonsai" aria-selected="false">Bonsai</button>
+        <button type="button" role="tab" id="tab-flower" aria-controls="scene-flower" aria-selected="false">Flower</button>
+        <button type="button" role="tab" id="tab-garden" aria-controls="scene-garden" aria-selected="false">Garden</button>
+        <button type="button" role="tab" id="tab-horns" aria-controls="scene-horns" aria-selected="false">Horns</button>
       </div>
-      <div class="showcase-footer"><p>One scene, many artistic possibilities.</p><div id="featured-options" class="featured-options" aria-label="Choose a featured result"></div></div>
+      <div class="scene-panel" role="tabpanel" tabindex="0" id="scene-kitchen" aria-labelledby="tab-kitchen">
+        <div class="scene-grid">
+          <figure><a class="media-box" href="media/kitchen-original.gif" aria-label="Open animation: Kitchen scene before stylization"><img src="media/kitchen-original.jpg" data-poster="media/kitchen-original.jpg" data-animation="media/kitchen-original.gif" loading="eager" decoding="async" alt="Kitchen scene before stylization"></a><figcaption>Original scene</figcaption></figure>
+          <figure class="reference"><a class="media-box" href="media/kitchen-scene-reference.jpg"><img loading="lazy" src="media/kitchen-scene-reference.jpg" alt="Style reference 16 for Kitchen"></a><figcaption>Reference 16</figcaption></figure>
+          <figure><a class="media-box" href="media/kitchen-scene.gif" aria-label="Open animation: Kitchen rendered with style 16"><img src="media/kitchen-scene.jpg" data-poster="media/kitchen-scene.jpg" data-animation="media/kitchen-scene.gif" loading="eager" decoding="async" alt="Kitchen rendered with style 16"></a><figcaption>Stylized scene</figcaption></figure>
+        </div>
+        <p class="meta"><strong>Kitchen</strong><span>Mip-NeRF 360</span></p>
+      </div>
+      <div class="scene-panel" role="tabpanel" tabindex="0" id="scene-bonsai" aria-labelledby="tab-bonsai">
+        <div class="scene-grid">
+          <figure><a class="media-box" href="media/bonsai-original.gif" aria-label="Open animation: Bonsai scene before stylization"><img src="media/bonsai-original.jpg" data-poster="media/bonsai-original.jpg" data-animation="media/bonsai-original.gif" loading="lazy" decoding="async" alt="Bonsai scene before stylization"></a><figcaption>Original scene</figcaption></figure>
+          <figure class="reference"><a class="media-box" href="media/bonsai-scene-reference.jpg"><img loading="lazy" src="media/bonsai-scene-reference.jpg" alt="Style reference 11 for Bonsai"></a><figcaption>Reference 11</figcaption></figure>
+          <figure><a class="media-box" href="media/bonsai-scene.gif" aria-label="Open animation: Bonsai rendered with style 11"><img src="media/bonsai-scene.jpg" data-poster="media/bonsai-scene.jpg" data-animation="media/bonsai-scene.gif" loading="lazy" decoding="async" alt="Bonsai rendered with style 11"></a><figcaption>Stylized scene</figcaption></figure>
+        </div>
+        <p class="meta"><strong>Bonsai</strong><span>Mip-NeRF 360</span></p>
+      </div>
+      <div class="scene-panel" role="tabpanel" tabindex="0" id="scene-flower" aria-labelledby="tab-flower">
+        <div class="scene-grid">
+          <figure><a class="media-box" href="media/flower-original.gif" aria-label="Open animation: Flower scene before stylization"><img src="media/flower-original.jpg" data-poster="media/flower-original.jpg" data-animation="media/flower-original.gif" loading="lazy" decoding="async" alt="Flower scene before stylization"></a><figcaption>Original scene</figcaption></figure>
+          <figure class="reference"><a class="media-box" href="media/flower-scene-reference.jpg"><img loading="lazy" src="media/flower-scene-reference.jpg" alt="Style reference 137 for Flower"></a><figcaption>Reference 137</figcaption></figure>
+          <figure><a class="media-box" href="media/flower-scene.gif" aria-label="Open animation: Flower rendered with style 137"><img src="media/flower-scene.jpg" data-poster="media/flower-scene.jpg" data-animation="media/flower-scene.gif" loading="lazy" decoding="async" alt="Flower rendered with style 137"></a><figcaption>Stylized scene</figcaption></figure>
+        </div>
+        <p class="meta"><strong>Flower</strong><span>LLFF</span></p>
+      </div>
+      <div class="scene-panel" role="tabpanel" tabindex="0" id="scene-garden" aria-labelledby="tab-garden">
+        <div class="scene-grid">
+          <figure><a class="media-box" href="media/garden-original.gif" aria-label="Open animation: Garden scene before stylization"><img src="media/garden-original.jpg" data-poster="media/garden-original.jpg" data-animation="media/garden-original.gif" loading="lazy" decoding="async" alt="Garden scene before stylization"></a><figcaption>Original scene</figcaption></figure>
+          <figure class="reference"><a class="media-box" href="media/garden-scene-reference.jpg"><img loading="lazy" src="media/garden-scene-reference.jpg" alt="Style reference 32 for Garden"></a><figcaption>Reference 32</figcaption></figure>
+          <figure><a class="media-box" href="media/garden-scene.gif" aria-label="Open animation: Garden rendered with style 32"><img src="media/garden-scene.jpg" data-poster="media/garden-scene.jpg" data-animation="media/garden-scene.gif" loading="lazy" decoding="async" alt="Garden rendered with style 32"></a><figcaption>Stylized scene</figcaption></figure>
+        </div>
+        <p class="meta"><strong>Garden</strong><span>Mip-NeRF 360</span></p>
+      </div>
+      <div class="scene-panel" role="tabpanel" tabindex="0" id="scene-horns" aria-labelledby="tab-horns">
+        <div class="scene-grid">
+          <figure><a class="media-box" href="media/horns-original.gif" aria-label="Open animation: Horns scene before stylization"><img src="media/horns-original.jpg" data-poster="media/horns-original.jpg" data-animation="media/horns-original.gif" loading="lazy" decoding="async" alt="Horns scene before stylization"></a><figcaption>Original scene</figcaption></figure>
+          <figure class="reference"><a class="media-box" href="media/horns-scene-reference.jpg"><img loading="lazy" src="media/horns-scene-reference.jpg" alt="Style reference 64 for Horns"></a><figcaption>Reference 64</figcaption></figure>
+          <figure><a class="media-box" href="media/horns-scene.gif" aria-label="Open animation: Horns rendered with style 64"><img src="media/horns-scene.jpg" data-poster="media/horns-scene.jpg" data-animation="media/horns-scene.gif" loading="lazy" decoding="async" alt="Horns rendered with style 64"></a><figcaption>Stylized scene</figcaption></figure>
+        </div>
+        <p class="meta"><strong>Horns</strong><span>LLFF</span></p>
+      </div>
     </section>
-    <section class="collection wrap" id="gallery" aria-labelledby="gallery-title">
-      <div class="section-top"><div><p class="eyebrow">SELECTED WORK</p><h2 id="gallery-title">Selected results<span class="blue">.</span></h2></div><p class="collection-stats" id="collection-stats">12 selected results <span>·</span> 10 scenes <span>·</span> 11 styles</p></div>
-      <p class="gallery-intro" id="gallery-status" aria-live="polite">A curated collection of expressive scenes and distinctive styles. Select any result to explore it in motion.</p>
-      <div class="results-grid" id="results-grid"></div>
-      <noscript><p>Enable JavaScript to explore the selected results. You can also <a href="assets/results/orchids-3/semgeo.mp4">watch a featured SemGeo animation</a>.</p></noscript>
+    <section id="controls" aria-labelledby="controls-title">
+      <div class="section-head"><h2 id="controls-title">FGW texture controls</h2></div>
+      <p class="section-description">Choose which 3D region receives a texture, how much of the reference to use, and where on the surface it appears.</p>
+      <div class="control-grid">
+        <article class="control control-lead">
+          <a class="media-box" href="media/kitchen-control.gif" aria-label="Open animation: Kitchen — Select a region"><img src="media/kitchen-control.jpg" data-poster="media/kitchen-control.jpg" data-animation="media/kitchen-control.gif" loading="lazy" decoding="async" alt="Kitchen — Select a region"></a>
+          <div class="control-copy">
+            <h3>Select a region</h3><p>Apply the same reference to the toy loader, the placemats, or both. Watch the surface of the bucket as the selection switches.</p>
+            <div class="control-meta"><a href="media/kitchen-control-reference.jpg"><img loading="lazy" src="media/kitchen-control-reference.jpg" alt="Open Kitchen style reference 135"></a><span>Kitchen · Reference 135</span><a href="media/kitchen-control.gif">Open GIF</a></div>
+            <p class="credit">Claude Monet, <i>The Magpie</i> (1868–69), Musée d’Orsay. <a href="https://commons.wikimedia.org/wiki/File:Claude_Monet_-_The_Magpie_-_Google_Art_Project.jpg">Image source</a></p>
+          </div>
+        </article>
+        <article class="control">
+          <a class="media-box" href="media/bonsai-control.gif" aria-label="Open animation: Bonsai — Move the 3D anchor"><img src="media/bonsai-control.jpg" data-poster="media/bonsai-control.jpg" data-animation="media/bonsai-control.gif" loading="lazy" decoding="async" alt="Bonsai — Move the 3D anchor"></a>
+          <div class="control-copy">
+            <h3>Move the 3D anchor</h3><p>The ring marks the projection of a point on the bonsai. At each of three anchor positions, the selected patch supplies 50% of the transport mass. Watch how its texture shifts across the canopy.</p>
+            <div class="control-meta"><a href="media/bonsai-control-reference.jpg"><img loading="lazy" src="media/bonsai-control-reference.jpg" alt="Open Bonsai style reference 64"></a><span>Bonsai · Reference 64</span><a href="media/bonsai-control.gif">Open GIF</a></div>
+          </div>
+        </article>
+        <article class="control">
+          <a class="media-box" href="media/flower-control.gif" aria-label="Open animation: Flower — Shift texture around an anchor"><img src="media/flower-control.jpg" data-poster="media/flower-control.jpg" data-animation="media/flower-control.gif" loading="lazy" decoding="async" alt="Flower — Shift texture around an anchor"></a>
+          <div class="control-copy">
+            <h3>Shift texture around an anchor</h3><p>Half of the transport mass comes from the selected reference patch. Nine bias settings redistribute it along the flower surface while the anchor stays fixed.</p>
+            <div class="control-meta"><a href="media/flower-control-reference.jpg"><img loading="lazy" src="media/flower-control-reference.jpg" alt="Open Flower style reference 77"></a><span>Flower · Reference 77</span><a href="media/flower-control.gif">Open GIF</a></div>
+          </div>
+        </article>
+        <article class="control">
+          <a class="media-box" href="media/garden-control.gif" aria-label="Open animation: Garden — Adjust local strength"><img src="media/garden-control.jpg" data-poster="media/garden-control.jpg" data-animation="media/garden-control.gif" loading="lazy" decoding="async" alt="Garden — Adjust local strength"></a>
+          <div class="control-copy">
+            <h3>Adjust local strength</h3><p>Follow the radial pattern on the tabletop as its stylized appearance strength changes from 0% to 50% to 100%.</p>
+            <div class="control-meta"><a href="media/garden-control-reference.jpg"><img loading="lazy" src="media/garden-control-reference.jpg" alt="Open Garden style reference 68"></a><span>Garden · Reference 68</span><a href="media/garden-control.gif">Open GIF</a></div>
+          </div>
+        </article>
+        <article class="control">
+          <a class="media-box" href="media/horns-control.gif" aria-label="Open animation: Horns — Set the texture share"><img src="media/horns-control.jpg" data-poster="media/horns-control.jpg" data-animation="media/horns-control.gif" loading="lazy" decoding="async" alt="Horns — Set the texture share"></a>
+          <div class="control-copy">
+            <h3>Set the texture share</h3><p>The selected reference patch supplies 20%, 50%, then 80% of the transport mass for the edited region. Compare the markings below the horns.</p>
+            <div class="control-meta"><a href="media/horns-control-reference.jpg"><img loading="lazy" src="media/horns-control-reference.jpg" alt="Open Horns style reference 107"></a><span>Horns · Reference 107</span><a href="media/horns-control.gif">Open GIF</a></div>
+          </div>
+        </article>
+      </div>
     </section>
-    <section class="project-section" id="project"><div class="wrap project-inner"><div><p class="eyebrow">THE PROJECT</p><h2>SemGeoSplat</h2><p class="project-subtitle">3D scene stylization, in motion.</p></div><div class="project-description"><p>Twelve selected SemGeo results, each paired with its original scene and style reference. Select any result to explore the animation in detail.</p><p>Training, rendering and interactive viewing code is available in the project repository.</p><a class="dark-button" href="https://github.com/TeAmo-Lemon/SemGeoSplat" target="_blank" rel="noopener">View project on GitHub <span>↗</span></a></div></div></section>
+    <section id="orbit" aria-labelledby="orbit-title">
+      <div class="section-head"><h2 id="orbit-title">Kitchen · Object orbit</h2></div>
+      <p class="section-description">A full turn around the toy loader. A scene-specific 3D crop separates the loader from the table. Both views render the same Gaussians along the same camera path. The stylized loader uses the boxed texture from reference 39.</p>
+      <div class="scene-grid orbit-grid">
+        <figure><a class="media-box" href="media/kitchen-orbit.gif" aria-label="Open animation: The yellow toy loader rotating on white"><img src="media/kitchen-orbit.jpg" data-poster="media/kitchen-orbit.jpg" data-animation="media/kitchen-orbit.gif" loading="lazy" decoding="async" alt="The yellow toy loader rotating on white"></a><figcaption>Original loader</figcaption></figure>
+        <figure class="reference"><a class="media-box" href="media/kitchen-orbit-reference.jpg"><img src="media/kitchen-orbit-reference.jpg" loading="lazy" alt="Style reference 39 used for the loader"></a><figcaption>Reference 39</figcaption></figure>
+        <figure><a class="media-box" href="media/kitchen-orbit-stylized.gif" aria-label="Open animation: The same toy loader after regional texture transfer"><img src="media/kitchen-orbit-stylized.jpg" data-poster="media/kitchen-orbit-stylized.jpg" data-animation="media/kitchen-orbit-stylized.gif" loading="lazy" decoding="async" alt="The same toy loader after regional texture transfer"></a><figcaption>Stylized loader</figcaption></figure>
+      </div>
+    </section>
   </main>
-  <footer class="wrap site-footer"><a class="brand" href="./">SemGeoSplat<span class="blue">.</span></a><p>Scenes reimagined. Perspectives preserved.</p><a href="#title">Back to top ↑</a></footer>
-  <dialog id="result-dialog" aria-labelledby="dialog-title">
-    <div class="dialog-header"><div><p class="eyebrow">RESULT VIEWER</p><h2 id="dialog-title"></h2></div><button id="close-dialog" class="icon-button" type="button" aria-label="Close result viewer">×</button></div>
-    <div class="dialog-grid"><figure class="dialog-result"><video id="dialog-video" controls muted loop playsinline preload="metadata"></video><figcaption>SemGeo result</figcaption></figure><div class="dialog-context"><figure><video id="dialog-original" controls muted loop playsinline preload="metadata"></video><figcaption>Original scene</figcaption></figure><figure class="dialog-style-figure"><img id="dialog-style" alt=""><figcaption>Style reference</figcaption></figure></div></div>
-    <div class="dialog-footer"><p id="dialog-position"></p><div><a id="open-video" target="_blank" rel="noopener">Open video ↗</a><button id="prev-result" class="outline-button" type="button" aria-label="Previous result">←</button><button id="next-result" class="outline-button" type="button" aria-label="Next result">→</button></div></div>
-  </dialog>
+  <footer><div class="wrap"><span>SemGeoSplat</span><a href="https://github.com/TeAmo-Lemon/SemGeoSplat">Source code</a></div></footer>
 </body>
 </html>

@@ -1,5 +1,13 @@
-"""Optimize spherical harmonics with region-conditioned style and consistency losses."""
+"""Optimize Gaussian SH with visibility-weighted VGG texture banks.
 
+Stage V gives distributions over texture banks or reference patch cells. Render the
+weights directly and use private reference crops for regions with an explicit target.
+Fit full-strength appearance, then compose the requested per-region SH strengths.
+The nearest-neighbor feature matching follows StylizedGS.
+"""
+
+import json
+import math
 import os
 from pathlib import Path
 from random import randint
@@ -9,65 +17,26 @@ import torch.nn.functional as F
 from tqdm import tqdm
 
 from gaussian_renderer import network_gui, render, render_features
+from .control import StyleControl, load_style_control, style_box_mask
 from .geometry import _compute_normals, compute_knn_graph
 from .paths import sidecar_path, style_output_dir
+from .tone import calibrate_style_tone
 
 
-_STYLE_VGG_BLOCKS = [2, 3]
-
+_STYLE_VGG_BLOCKS = [2, 3]   # NNFM 取 VGG block (StylizedGS 默认 [2,3]); block→layer 见下表
+# VGG16.features 层索引 (自 StylizedGS nnfm_loss.py): block i 取第 i+1 个卷积块的所有 Conv2d.
 _VGG_BLOCK_INDEXES = [[1, 3], [6, 8], [11, 13, 15], [18, 20, 22], [25, 27, 29]]
+_MIN_STYLE_COVERAGE = 1e-6
 
 
-def _argmin_cos_distance(a, b):
-    """a: [B,C,Na], b: [B,C,Nb] → z_best [B, Na] (a 每列在 b 中最近邻下标, cosine 距离)."""
-    b_norm = ((b * b).sum(1, keepdim=True) + 1e-8).sqrt()
-    b = b / (b_norm + 1e-8)
-    z_best = []
-    loop_batch_size = max(1, int(1e8 / b.shape[-1]))
-    for i in range(0, a.shape[-1], loop_batch_size):
-        a_batch = a[..., i : i + loop_batch_size]
-        a_batch_norm = ((a_batch * a_batch).sum(1, keepdim=True) + 1e-8).sqrt()
-        a_batch = a_batch / (a_batch_norm + 1e-8)
-        d_mat = 1.0 - torch.matmul(a_batch.transpose(2, 1), b)
-        z_best.append(torch.argmin(d_mat, 2))
-    return torch.cat(z_best, dim=-1)
-
-
-def _nn_feat_replace(a, b):
-    """a: [1,C,h,w], b: [1,C,h2,w2] → [1,C,h,w]. a 每个空间位置替换为 b 中最近邻特征.
-    argmin 在 no_grad 下算 (非可导), 输出 gather 自 b (风格特征, 常量) → target 无梯度,
-    梯度只经 a (渲染特征) 回流到 SH."""
-    n, c, h, w = a.size()
-    n2, c2, h2, w2 = b.size()
-    assert (n == 1) and (n2 == 1)
-    a_flat = a.view(n, c, -1)
-    b_flat = b.view(n2, c, -1)
-    b_ref = b_flat.clone()
-    with torch.no_grad():
-        z_best = _argmin_cos_distance(a_flat.detach(), b_flat)
-    z_best = z_best.unsqueeze(1).repeat(1, c, 1)
-    feat = torch.gather(b_ref, 2, z_best)
-    return feat.view(n, c, h, w)
-
-
-def _cos_loss(a, b):
-    """a, b: [B,C,...] → mean(1 - cosine sim) over channel dim. 与 StylizedGS cos_loss 一致."""
-    a_norm = (a * a).sum(1, keepdim=True).sqrt()
-    b_norm = (b * b).sum(1, keepdim=True).sqrt()
-    a_tmp = a / (a_norm + 1e-8)
-    b_tmp = b / (b_norm + 1e-8)
-    cossim = (a_tmp * b_tmp).sum(1)
-    return (1.0 - cossim).mean()
 
 
 class _VGGFeatureExtractor(torch.nn.Module):
     """VGG16 卷积特征提取器 (NNFM 用). 输入须已 ImageNet 归一化 (与 ③ DINO 预处理一致,
     故 ⑥ 复用 ③ 的风格图张量可直接喂 VGG, patch 网格与 VGG 特征精确对齐)."""
-
     def __init__(self, device):
         super().__init__()
         from torchvision.models import vgg16, VGG16_Weights
-
         self.vgg = vgg16(weights=VGG16_Weights.DEFAULT).eval().to(device)
         for p in self.vgg.parameters():
             p.requires_grad_(False)
@@ -86,107 +55,107 @@ class _VGGFeatureExtractor(torch.nn.Module):
 
 def _vgg_imagenet_normalize(img_01, device):
     """img_01 in [0,1], shape [1,3,H,W] → ImageNet 归一化 (与 DINO 预处理 mean/std 一致)."""
-    mean = torch.tensor([0.485, 0.456, 0.406], dtype=torch.float32, device=device).view(
-        1, 3, 1, 1
-    )
-    std = torch.tensor([0.229, 0.224, 0.225], dtype=torch.float32, device=device).view(
-        1, 3, 1, 1
-    )
+    mean = torch.tensor([0.485, 0.456, 0.406], dtype=torch.float32, device=device).view(1, 3, 1, 1)
+    std = torch.tensor([0.229, 0.224, 0.225], dtype=torch.float32, device=device).view(1, 3, 1, 1)
     return (img_01 - mean) / std
 
 
-def _build_style_banks(
-    extractor, style_tensor, patch_assignments, patch_hw, blocks, K, device
-):
-    """风格图 → 逐基元 VGG 特征库. 复用 ③ 的预处理张量 (ImageNet 归一化, 与 VGG 对齐).
-    patch 指派网格 [ph,pw] 最近邻上采样到各 VGG block 分辨率 → 每个风格 VGG 位置一个基元标签
-    → 按基元收集成 bank. 返回 banks[block_idx][k] = [C, N_k] (常量, 无梯度)."""
+def _style_block_features(extractor, image, blocks):
+    layers = [layer for block in blocks for layer in _VGG_BLOCK_INDEXES[block]]
+    features_by_layer = dict(zip(layers, extractor.get_feats(image, layers)))
+    return [torch.cat([features_by_layer[layer] for layer in _VGG_BLOCK_INDEXES[block]], 1)[0]
+            for block in blocks]
+
+
+def _build_style_banks(extractor, style_tensor, patch_assignments, patch_hw, patch_size,
+                       blocks, bank_routes, target_boxes, valid_patches, texture_routes=None):
+    """Build shared banks and private banks with VGG evaluated inside each selected crop."""
+    if style_tensor.dim() == 3:
+        style_tensor = style_tensor.unsqueeze(0)
+    label_grid = patch_assignments.reshape(patch_hw).cpu()
+    valid_grid = valid_patches.reshape(patch_hw).cpu()
+    groups = {}
+    for channel, (group, label) in enumerate(bank_routes):
+        groups.setdefault(group, []).append((channel, label))
+    banks = [{} for _ in blocks]
+
     with torch.no_grad():
-        x = (
-            style_tensor if style_tensor.dim() == 4 else style_tensor.unsqueeze(0)
-        )  # [1,3,Hs,Ws]
-        all_layers = []
-        for b in blocks:
-            all_layers += _VGG_BLOCK_INDEXES[b]
-        feats_all = extractor.get_feats(x, all_layers)
-        ix_map = {layer: i for i, layer in enumerate(all_layers)}
-        ph, pw = patch_hw
-        label_map = patch_assignments.view(ph, pw).float().unsqueeze(0).unsqueeze(0)
-        banks = []
-        for b in blocks:
-            layers = _VGG_BLOCK_INDEXES[b]
-            feat = torch.cat([feats_all[ix_map[ix]] for ix in layers], 1)[
-                0
-            ]  # [C, Hf, Wf]
-            C, Hf, Wf = feat.shape
-            lab = F.interpolate(label_map, size=(Hf, Wf), mode="nearest")[0, 0].long()
-            feat_flat = feat.reshape(C, -1)
-            lab_flat = lab.reshape(-1)
-            bank_k = {}
-            for k in range(K):
-                m = lab_flat == k
-                bank_k[k] = (
-                    feat_flat[:, m].contiguous()
-                    if m.any()
-                    else torch.empty(C, 0, device=device)
-                )
-            banks.append(bank_k)
+        for group, routes in groups.items():
+            selected = valid_grid
+            image = style_tensor
+            if texture_routes is None:
+                labels = label_grid
+                box = target_boxes[group] if group is not None else None
+            else:
+                target = texture_routes[group]
+                labels = target["patch_channels"].reshape(patch_hw).cpu()
+                selected = selected & (labels >= 0)
+                box = target.get("reference_box", group)
+            if box is not None:
+                selected = selected & style_box_mask(box, patch_hw).reshape(patch_hw)
+                rows, cols = selected.nonzero(as_tuple=True)
+                if rows.numel() == 0:
+                    raise ValueError(f"reference box {box} contains no valid patches")
+                top, bottom = int(rows.min()), int(rows.max()) + 1
+                left, right = int(cols.min()), int(cols.max()) + 1
+                image = image[..., top * patch_size:bottom * patch_size,
+                             left * patch_size:right * patch_size]
+                selected = selected[top:bottom, left:right]
+                labels = labels[top:bottom, left:right]
+            labels = torch.where(selected, labels, -1).float().to(image.device)[None, None]
+
+            for bank, feature in zip(banks, _style_block_features(extractor, image, blocks)):
+                resized = F.interpolate(labels, size=feature.shape[-2:], mode="nearest").reshape(-1).long()
+                features = feature.flatten(1)
+                for channel, label in routes:
+                    bank[channel] = features[:, resized == label].contiguous()
     return banks
 
 
-def _style_loss_per_view(
-    extractor, rendered_01, prim_label, depth, banks, blocks, K, device
-):
-    """单视图逐基元 NNFM loss. rendered_01 [3,H,W] in [0,1]; prim_label [H,W] (alpha-blended
-    基元标签); depth [1,H,W] (inv_depth, >0=前景). 渲染特征按逐像素基元路由到对应风格库做
-    最近邻替换 + cosine loss; 前景掩码由 depth>0 给出 (无需相机原图/alpha_mask)."""
-    x = _vgg_imagenet_normalize(rendered_01.unsqueeze(0), device)  # [1,3,H,W]
-    all_layers = []
-    for b in blocks:
-        all_layers += _VGG_BLOCK_INDEXES[b]
-    feats_all = extractor.get_feats(x, all_layers)
-    ix_map = {layer: i for i, layer in enumerate(all_layers)}
-    fg_full = depth[0] > 0  # [H, W]
-    total_loss = torch.zeros((), device=device)
-    total_n = 0
-    for bi, b in enumerate(blocks):
-        layers = _VGG_BLOCK_INDEXES[b]
-        feat = torch.cat([feats_all[ix_map[ix]] for ix in layers], 1)[0]  # [C, Hf, Wf]
-        C, Hf, Wf = feat.shape
-        pl = (
-            F.interpolate(
-                prim_label.float().unsqueeze(0).unsqueeze(0),
-                size=(Hf, Wf),
-                mode="nearest",
-            )[0, 0]
-            .round()
-            .long()
-        )
-        fg = F.interpolate(
-            fg_full.float().unsqueeze(0).unsqueeze(0), size=(Hf, Wf), mode="nearest"
-        )[0, 0].bool()
-        feat_flat = feat.reshape(C, -1)
-        pl_flat = pl.reshape(-1)
-        fg_flat = fg.reshape(-1)
-        bank_k = banks[bi]
-        for k in range(K):
-            mask = fg_flat & (pl_flat == k)
-            n_k = int(mask.sum().item())
-            if n_k == 0:
-                continue
-            S_k = bank_k.get(k)
-            if S_k is None or S_k.shape[1] == 0:
-                continue
-            R_k = feat_flat[:, mask].contiguous()  # [C, n_k]
-            target_k = _nn_feat_replace(
-                R_k.unsqueeze(0).unsqueeze(2), S_k.unsqueeze(0).unsqueeze(2)
-            )  # [1,C,1,n_k]
-            loss_k = _cos_loss(R_k.unsqueeze(0).unsqueeze(2), target_k)  # scalar
-            total_loss = total_loss + loss_k * n_k
-            total_n += n_k
-    if total_n == 0:
-        return None
-    return total_loss / total_n
+
+
+def _routed_style_loss_per_view(extractor, rendered, rendered_weights, banks, blocks, hard):
+    """Weight per-bank NNFM by posterior probability and the edited surface's visible coverage."""
+    image = _vgg_imagenet_normalize(rendered.unsqueeze(0), rendered.device)
+    total_loss = rendered.new_zeros(())
+    total_coverage = rendered.new_zeros(())
+    for feat, bank in zip(_style_block_features(extractor, image, blocks), banks):
+        channels = [channel for channel, texture in bank.items() if texture.shape[1] > 0]
+        if not channels:
+            continue
+        mass = F.interpolate(rendered_weights[channels][None], size=feat.shape[-2:],
+                             mode="area")[0].flatten(1).clamp_min(0)
+        coverage = mass.sum(dim=0)
+        valid = coverage > _MIN_STYLE_COVERAGE
+        if hard:
+            # Class channels vote by visibility. Numeric label magnitudes never mix.
+            assignments = mass.argmax(dim=0)
+            mass = torch.zeros_like(mass).scatter_(0, assignments[None], coverage[None])
+
+        direction = F.normalize(feat.flatten(1), dim=0, eps=1e-8)
+        with torch.no_grad():
+            weighted_targets = torch.zeros_like(direction)
+            for row, channel in enumerate(channels):
+                weights = mass[row]
+                indices = (valid & (weights > 0)).nonzero().flatten()
+                if indices.numel() == 0:
+                    continue
+                reference = bank[channel]
+                # Cosine nearest-neighbor search on unit columns. Keep each match
+                # matrix small even when many pixel routes share one large bank.
+                chunk = max(1, (1 << 24) // reference.shape[1])
+                for subset in indices.split(chunk):
+                    best = (reference.T @ direction[:, subset]).argmax(dim=0)
+                    weighted_targets[:, subset] += reference[:, best] * weights[subset]
+
+        block_coverage = coverage[valid].sum()
+        # Sum of expected cosine losses, with a single source gradient per pixel.
+        total_loss = total_loss + block_coverage - (direction * weighted_targets).sum()
+        total_coverage = total_coverage + block_coverage
+
+    # The render mass is the per-pixel posterior times visible edited coverage.
+    # Zero coverage represents a pixel without a style target.
+    return total_loss / total_coverage.clamp_min(_MIN_STYLE_COVERAGE)
 
 
 def _precompute_style_graph(gaussians, k, backend, device):
@@ -196,9 +165,9 @@ def _precompute_style_graph(gaussians, k, backend, device):
     knn_idx, _ = compute_knn_graph(xyz, k, backend=backend)
     scaling = gaussians.get_scaling.detach()
     rotation = gaussians.get_rotation.detach()
-    normals = _compute_normals(scaling, rotation)  # [N,3]
-    nbr_n = normals[knn_idx]  # [N,k,3]
-    normal_dot = torch.einsum("nkd,nd->nk", nbr_n, normals).abs()  # [N,k]
+    normals = _compute_normals(scaling, rotation)                   # [N,3]
+    nbr_n = normals[knn_idx]                                         # [N,k,3]
+    normal_dot = torch.einsum("nkd,nd->nk", nbr_n, normals).abs()   # [N,k]
     return knn_idx, normal_dot
 
 
@@ -206,114 +175,297 @@ def _normal_tv_loss(features_dc, knn_idx, normal_dot, tau_normal):
     """L_normal (法线一致邻居 SH DC 一致) + L_tv (空间邻居 SH DC 全变分).
     "风格特征" 取 SH DC (视角无关基础色): 正则化它直接抑制视角切换闪烁, 且 [N,3] 内存可控.
     features_dc [N,1,3]; L_tv 覆盖所有 KNN 邻居, L_normal 是其中 |n_i·n_j|>τ 的子集."""
-    c = features_dc.reshape(-1, 3)  # [N,3]
-    nbr_c = c[knn_idx]  # [N,k,3]
-    diff = (c.unsqueeze(1) - nbr_c).abs()  # [N,k,3]
+    c = features_dc.reshape(-1, 3)                                  # [N,3]
+    nbr_c = c[knn_idx]                                              # [N,k,3]
+    diff = (c.unsqueeze(1) - nbr_c).abs()                          # [N,k,3]
     l_tv = diff.mean()
-    normal_mask = normal_dot > tau_normal  # [N,k]
+    normal_mask = (normal_dot > tau_normal)                         # [N,k]
     n_normal = normal_mask.sum()
     if n_normal.item() > 0:
-        l_normal = (diff * normal_mask.unsqueeze(-1).float()).sum() / (
-            n_normal.float() * 3.0 + 1e-8
-        )
+        l_normal = (diff * normal_mask.unsqueeze(-1).float()).sum() / \
+                   (n_normal.float() * 3.0 + 1e-8)
     else:
         l_normal = torch.zeros((), device=c.device)
     return l_normal, l_tv
 
 
+@torch.no_grad()
+def _prepare_patch_routing(xyz, point_regions, region_map, control, texture_routes):
+    """Lift representative patch probabilities to Gaussians in the same region."""
+    device = xyz.device
+    candidates = ~control.locked & (region_map.cpu() >= 0)
+    trained_regions = torch.zeros_like(candidates)
+    bank_routes = []
+    region_routes = {}
+    for group, target in texture_routes.items():
+        box = target.get("reference_box", group)
+        region_plans = target["region_routes"]
+        channel_count = int(target["patch_channels"].max()) + 1
+        if channel_count <= 0:
+            continue
+        start = len(bank_routes)
+        for region_id, (points, probabilities) in region_plans.items():
+            if not 0 <= region_id < len(candidates):
+                raise ValueError(f"invalid patch routing region {region_id}")
+            if not candidates[region_id]:
+                continue
+            if box != control.target_boxes.get(region_id) or region_id in region_routes:
+                raise ValueError(f"invalid reference box for patch routing region {region_id}")
+            if (points.ndim != 2 or points.shape[1] != 3 or len(points) == 0
+                    or probabilities.ndim != 2 or probabilities.shape[1] != channel_count
+                    or len(probabilities) not in (1, len(points))):
+                raise ValueError(f"invalid patch routing dimensions for region {region_id}")
+            if (not torch.isfinite(points).all() or not torch.isfinite(probabilities).all()
+                    or (probabilities < 0).any()):
+                raise ValueError(f"invalid patch routing data for region {region_id}")
+            mass = probabilities.sum(dim=1, keepdim=True)
+            valid = mass[:, 0] > 0
+            if not valid.any():
+                continue
+            rows = probabilities[valid] / mass[valid]
+            reps = points[valid.to(points.device)] if len(probabilities) > 1 else points
+            region_routes[region_id] = (slice(start, start + channel_count), reps, rows)
+            trained_regions[region_id] = True
+        if any(trained_regions[region_id] for region_id in region_plans):
+            bank_routes.extend((group, channel) for channel in range(channel_count))
+
+    counts = torch.bincount(point_regions + 1, minlength=len(candidates) + 1)
+    offsets = [0, *counts.cumsum(dim=0).tolist()]
+    indices_by_region = point_regions.argsort(stable=True)
+    render_routes = torch.zeros((len(xyz), len(bank_routes)), dtype=torch.float32, device=device)
+    for region_id, (channels, reps, weights) in region_routes.items():
+        indices = indices_by_region[offsets[region_id + 1]:offsets[region_id + 2]].to(device)
+        weights = weights.to(device=device, dtype=render_routes.dtype)
+        if len(weights) == 1:
+            render_routes[indices, channels] = weights
+            continue
+        reps = reps.to(device=device, dtype=xyz.dtype)
+        tiny = torch.finfo(xyz.dtype).tiny
+        for chunk in indices.split(8192):
+            distances = torch.cdist(xyz[chunk], reps, compute_mode="donot_use_mm_for_euclid_dist")
+            nearest_distances, nearest_indices = distances.topk(min(3, len(reps)), largest=False)
+            closest = nearest_distances[:, :1]
+            # Coincident representatives take all mass. For other points, scale
+            # inverse distances by the nearest distance before normalization.
+            blend = torch.where(closest == 0, nearest_distances == 0,
+                                closest / nearest_distances.clamp_min(tiny))
+            blend = blend.to(weights.dtype)
+            blend = blend / blend.sum(dim=1, keepdim=True)
+            render_routes[chunk, channels] = (weights[nearest_indices] * blend[..., None]).sum(dim=1)
+    return render_routes, bank_routes, trained_regions
+
+
+def _prepare_style_routing(gaussians, primitives, control, texture_routes=None):
+    """Map region probabilities to shared texture banks or banks private to a crop."""
+    region_map = gaussians.region_primitive_map
+    point_regions = gaussians.cluster_labels.cpu().long()
+    num_regions = region_map.numel()
+    num_primitives = int(primitives.shape[0])
+    if point_regions.shape != (gaussians.get_xyz.shape[0],):
+        raise ValueError("cluster_labels does not match the Gaussian point count")
+    if point_regions.numel() and (point_regions.min() < -1 or point_regions.max() >= num_regions):
+        raise ValueError("cluster_labels contains an invalid region ID")
+
+    # The final lookup row is reserved for invalid Gaussians (-1).
+    point_rows = torch.where(point_regions >= 0, point_regions, num_regions)
+    strengths = torch.cat((control.strengths, control.strengths.new_zeros(1)))[point_rows]
+    if texture_routes is not None:
+        render_routes, bank_routes, trained_regions = _prepare_patch_routing(
+            gaussians.get_xyz, point_regions, region_map, control, texture_routes)
+        editable = torch.cat((trained_regions, trained_regions.new_zeros(1)))[point_rows]
+        return render_routes, bank_routes, trained_regions, editable, strengths
+
+    weights = getattr(gaussians, "region_primitive_weights", None)
+    if weights is None:
+        weights = F.one_hot(region_map.cpu().clamp_min(0), num_primitives).float()
+        weights[region_map.cpu() < 0] = 0
+    else:
+        weights = weights.float().cpu().clone()
+        if weights.shape != (num_regions, num_primitives):
+            raise ValueError("region texture weights do not match the scene regions and style banks")
+        if not torch.isfinite(weights).all() or (weights < 0).any():
+            raise ValueError("region texture weights must be finite and nonnegative")
+    weight_sum = weights.sum(dim=1, keepdim=True)
+    trained_regions = ~control.locked & (weight_sum[:, 0] > 0)
+    weights = weights / weight_sum.clamp_min(_MIN_STYLE_COVERAGE)
+    weights[~trained_regions] = 0
+
+    shared_weights = weights.clone()
+    anchored_regions = sorted(control.target_boxes)
+    shared_weights[anchored_regions] = 0
+    used_shared = shared_weights.any(dim=0).nonzero().flatten().tolist()
+    shared_routes = [(None, primitive) for primitive in used_shared]
+    private_routes = [(region_id, primitive) for region_id in anchored_regions
+                      for primitive in weights[region_id].nonzero().flatten().tolist()]
+    bank_routes = shared_routes + private_routes
+    region_routes = weights.new_zeros(num_regions + 1, len(bank_routes))
+    region_routes[:num_regions, :len(shared_routes)] = shared_weights[:, used_shared]
+    for channel, (region_id, primitive) in enumerate(private_routes, start=len(shared_routes)):
+        region_routes[region_id, channel] = weights[region_id, primitive]
+
+    device = gaussians.get_xyz.device
+    render_routes = region_routes.to(device)[point_rows.to(device)].contiguous()
+    editable = torch.cat((trained_regions, trained_regions.new_zeros(1)))[point_rows]
+    return render_routes, bank_routes, trained_regions, editable, strengths
+
+
+def _output_controlled_appearance(gaussians, dataset, style, control, trained_regions,
+                                  editable, strengths, base_blend, training_stats):
+    styled_dir = style_output_dir(dataset.model_path, style.style_iterations)
+    os.makedirs(styled_dir, exist_ok=True)
+    point_indices = None if editable.all() else editable.nonzero().flatten()
+    payload = {
+        "version": 1,
+        "num_points": len(editable),
+        "source_ply_path": getattr(gaussians, "style_source_ply_path", None),
+        "xyz_fingerprint": gaussians._xyz_fingerprint(),
+        "point_indices": point_indices,
+        "strengths": control.strengths,
+        "trained_regions": trained_regions,
+    }
+    for key, tensor in (("styled_dc", gaussians._features_dc),
+                        ("styled_rest", gaussians._features_rest)):
+        full_appearance = tensor.detach()
+        if point_indices is not None:
+            full_appearance = full_appearance[point_indices.to(tensor.device)]
+        payload[key] = full_appearance.cpu()
+    path = sidecar_path(dataset.model_path, style.style_iterations, "style_sh.pt")
+    torch.save(payload, path)
+
+    blend_indices, orig_dc, orig_rest = base_blend
+    if blend_indices.numel() > 0:
+        with torch.no_grad():
+            for tensor, original in ((gaussians._features_dc, orig_dc),
+                                     (gaussians._features_rest, orig_rest)):
+                index = blend_indices.to(tensor.device)
+                amount = strengths[blend_indices].to(tensor.device)[:, None, None]
+                full_strength = tensor[index]
+                tensor[index] = torch.lerp(original.to(tensor.device), full_strength, amount)
+
+    styled_ply = os.path.join(styled_dir, "point_cloud.ply")
+    gaussians.save_ply(styled_ply)
+    with open(os.path.join(styled_dir, "style_training.json"), "w", encoding="utf-8") as handle:
+        json.dump(training_stats, handle, indent=2)
+    print(f"[style] ⑥ done: styled ply -> {styled_ply}")
+
+
 def generate_style(dataset, gaussians, scene, pipe, background, style):
-    """Freeze geometry and optimize spherical harmonics using region-conditioned VGG style losses with normal and TV regularization. Save the styled scene and sidecars."""
+    """Train appearance against the Stage V texture routing and save its controlled SH."""
     if style.style_iterations <= 0:
         print("[style] ⑥ skipped: style_iterations <= 0")
         return
     primitives = getattr(gaussians, "style_primitives", None)
     primitive_labels = getattr(gaussians, "primitive_labels", None)
+    region_map = getattr(gaussians, "region_primitive_map", None)
     if primitives is None or primitives.numel() == 0:
-        print(
-            "[style] ⑥ skipped: no style_primitives (③ did not run / no --style_image)"
-        )
+        print("[style] ⑥ skipped: no style_primitives (③ did not run / no --style_image)")
         return
-    if primitive_labels is None:
-        print("[style] ⑥ skipped: no primitive_labels (⑤ did not run / failed)")
+    if primitive_labels is None or region_map is None:
+        print("[style] ⑥ skipped: no region assignment (⑤ did not run / failed)")
         return
     if style.style_lambda_photo > 0:
         print("[style] ⑥ λ_photo>0 但 L_photo 未实现 (相机原图已释放); 忽略 L_photo")
 
-    device = torch.device("cuda")
+    device = gaussians.get_xyz.device
     K = int(primitives.shape[0])
     blocks = list(_STYLE_VGG_BLOCKS)
-    final_styled_iter = style.style_iterations
     n_points = gaussians.get_xyz.shape[0]
+    texture_routes = getattr(gaussians, "spatial_fgw_texture_routes", None)
+    soft = texture_routes is not None or getattr(gaussians, "region_primitive_weights", None) is not None
+    control_file = getattr(style, "style_control_file", "")
+    global_strength = float(getattr(style, "style_control_strength", 1.0))
 
-    for p in (
-        gaussians._xyz,
-        gaussians._scaling,
-        gaussians._rotation,
-        gaussians._opacity,
-        gaussians._dino_features,
-    ):
+    # Preserve the exact patch layout used by Stage III to construct the texture banks.
+    patch_assignments = getattr(gaussians, "style_patch_assignments", None)
+    patch_hw = getattr(gaussians, "style_patch_hw", None)
+    patch_size = getattr(gaussians, "style_patch_size", None)
+    preprocess_size = getattr(gaussians, "style_preprocess_max_size", style.style_primitive_size)
+    valid_patches = getattr(gaussians, "style_patch_valid_mask", None)
+    if patch_assignments is None or patch_hw is None:
+        path = sidecar_path(dataset.model_path, style.style_iterations, "style_primitives.pt")
+        payload = torch.load(path, map_location="cpu", weights_only=True)
+        patch_assignments = payload["patch_assignments"]
+        patch_hw = payload["patch_hw"]
+        patch_size = payload.get("patch_size", 16)
+        preprocess_size = payload.get("preprocess_max_size", preprocess_size)
+        valid_patches = payload.get("patch_valid_mask")
+    if valid_patches is None:
+        valid_patches = torch.ones_like(patch_assignments, dtype=torch.bool)
+
+    if soft:
+        control = StyleControl(gaussians.region_style_strengths, gaussians.region_style_locked,
+                               gaussians.region_style_target_boxes, getattr(gaussians, "region_texture_mixes", {}))
+    else:
+        control = load_style_control(control_file, region_map.numel(), patch_hw,
+                                     default_strength=global_strength)
+    if control.target_boxes and not soft:
+        raise ValueError("reference patch selection requires spatial FGW texture matching")
+
+    render_routes, bank_routes, trained_regions, editable, strengths = _prepare_style_routing(
+        gaussians, primitives, control, texture_routes)
+    blend_indices = (editable & (strengths != 1)).nonzero().flatten()
+    blend_index_device = blend_indices.to(device)
+    base_blend = (blend_indices, gaussians._features_dc.detach()[blend_index_device].cpu(),
+                  gaussians._features_rest.detach()[blend_index_device].cpu())
+    mode = "soft" if soft else "hard"
+    training_stats = {
+        "mode": mode,
+        "num_gaussians": n_points,
+        "editable_gaussians": int(editable.sum()),
+        "trained_regions": int(trained_regions.sum()),
+        "bank_count": len(bank_routes),
+        "target_boxes": control.target_boxes,
+        "texture_mixes": control.texture_mixes,
+        "loss_history": [],
+    }
+    if texture_routes is not None:
+        training_stats["spatial_fgw_routing"] = style.spatial_fgw_routing
+    if not editable.any():
+        _output_controlled_appearance(gaussians, dataset, style, control, trained_regions,
+                                      editable, strengths, base_blend, training_stats)
+        return
+    locked_indices = (~editable).nonzero().flatten().to(device)
+
+    # A fresh Adam state and zeroed gradients keep locked Gaussian coefficients exact.
+    for p in (gaussians._xyz, gaussians._scaling, gaussians._rotation,
+              gaussians._opacity, gaussians._dino_features):
         if p is not None:
             p.requires_grad_(False)
     for p in (gaussians._features_dc, gaussians._features_rest):
         p.requires_grad_(True)
-    style_optimizer = torch.optim.Adam(
-        [
-            {"params": [gaussians._features_dc], "lr": style.style_lr},
-            {"params": [gaussians._features_rest], "lr": style.style_lr / 20.0},
-        ],
-        lr=0.0,
-        eps=1e-15,
-    )
+    style_optimizer = torch.optim.Adam([
+        {"params": [gaussians._features_dc], "lr": style.style_lr},
+        {"params": [gaussians._features_rest], "lr": style.style_lr / 20.0},
+    ], lr=0.0, eps=1e-15)
 
-    from semgeo_utils.dino_features import _load_and_preprocess_image
-
-    print(
-        f"[style] ⑥ start: {n_points:,} gaussians, {K} primitives, "
-        f"{style.style_iterations} iters, blocks={blocks}, λ(style/normal/tv)="
-        f"{style.style_lambda}/{style.style_lambda_normal}/{style.style_lambda_tv}"
-    )
+    from scripts.extract_dino_features import _load_and_preprocess_image
+    print(f"[style] ⑥ start: {training_stats['editable_gaussians']:,}/{n_points:,} editable Gaussians, "
+          f"{len(bank_routes)} texture banks, {mode} routing, "
+          f"{style.style_iterations} iters, blocks={blocks}, λ(style/normal/tv)="
+          f"{style.style_lambda}/{style.style_lambda_normal}/{style.style_lambda_tv}")
     extractor = _VGGFeatureExtractor(device)
-
-    patch_assignments = getattr(gaussians, "style_patch_assignments", None)
-    patch_hw = getattr(gaussians, "style_patch_hw", None)
-    patch_size = getattr(gaussians, "style_patch_size", None)
-    if patch_assignments is None or patch_hw is None:
-        sidecar = sidecar_path(
-            dataset.model_path, style.style_iterations, "style_primitives.pt"
-        )
-        payload = torch.load(sidecar, map_location="cpu")
-        patch_assignments = payload["patch_assignments"]
-        patch_hw = payload["patch_hw"]
-        patch_size = payload.get("patch_size", 16)
-    style_tensor, _, _ = _load_and_preprocess_image(
-        Path(style.style_image),
-        patch_size=patch_size,
-        device=device,
-        max_size=style.style_primitive_size,
-    )
-    banks = _build_style_banks(
-        extractor,
-        style_tensor,
-        patch_assignments.to(device),
-        patch_hw,
-        blocks,
-        K,
-        device,
-    )
+    style_tensor, _, loaded_patch_hw = _load_and_preprocess_image(
+        Path(style.style_image), patch_size=patch_size, device=device,
+        max_size=preprocess_size)
+    if tuple(loaded_patch_hw) != tuple(patch_hw):
+        raise ValueError("reference image patch layout does not match Stage III texture banks")
+    banks = _build_style_banks(extractor, style_tensor, patch_assignments, patch_hw, patch_size,
+                               blocks, bank_routes, control.target_boxes, valid_patches, texture_routes)
+    for bank in banks:
+        if not any(features.shape[1] for features in bank.values()):
+            raise ValueError("a style loss layer has no valid reference texture features")
+    banks = [{channel: F.normalize(features, dim=0, eps=1e-8) for channel, features in bank.items()}
+             for bank in banks]
     del style_tensor, patch_assignments
 
     knn_idx, normal_dot = _precompute_style_graph(
-        gaussians, style.style_tv_knn_k, style.style_knn_backend, device
-    )
-
-    pl = primitive_labels.to(device)
-    pl = torch.where(pl >= 0, pl.float(), torch.zeros_like(pl, dtype=torch.float32))
-    pl_render = pl.unsqueeze(1).contiguous()  # [N, 1]
+        gaussians, style.style_tv_knn_k, style.style_knn_backend, device)
 
     cameras = scene.getTrainCameras().copy()
     viewpoint_stack = []
     rs = style.style_render_scale
-    progress = tqdm(range(style.style_iterations), desc="Style ⑥")
+    rasterize_mode = "antialiased" if pipe.antialiasing else "classic"
+    progress = tqdm(total=style.style_iterations, desc="Style ⑥")
     ema_loss = ema_style = ema_normal = ema_tv = 0.0
     for it in range(1, style.style_iterations + 1):
         network_gui.update(it, num_train_rays_per_step=1)
@@ -325,81 +477,63 @@ def generate_style(dataset, gaussians, scene, pipe, background, style):
         cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack) - 1))
 
         with network_gui.lock:
-            render_pkg = render(
-                cam,
-                gaussians,
-                pipe,
-                background,
-                use_trained_exp=False,
-                no_densify_hook=True,
-            )
+            render_pkg = render(cam, gaussians, pipe, background,
+                                use_trained_exp=False, no_densify_hook=True)
             with torch.no_grad():
-                prim_map = render_features(cam, gaussians, pl_render)  # [1,H,W]
-        rgb = render_pkg["render"]  # [3,H,W] in [0,1]
-        depth = render_pkg["depth"]  # [1,H,W] inv_depth
+                route_map = render_features(cam, gaussians, render_routes, rasterize_mode=rasterize_mode)
+        rgb = render_pkg["render"]
 
         if rs != 1.0:
-            rgb_v = F.interpolate(
-                rgb.unsqueeze(0), scale_factor=rs, mode="bilinear", align_corners=False
-            )[0]
-            depth_v = F.interpolate(
-                depth.unsqueeze(0),
-                scale_factor=rs,
-                mode="bilinear",
-                align_corners=False,
-            )[0]
-            prim_map = F.interpolate(
-                prim_map.unsqueeze(0),
-                scale_factor=rs,
-                mode="bilinear",
-                align_corners=False,
-            )[0]
-        else:
-            rgb_v, depth_v = rgb, depth
-        prim_label = prim_map[0]  # [H,W]
-
-        L_style = _style_loss_per_view(
-            extractor, rgb_v, prim_label, depth_v, banks, blocks, K, device
-        )
-        L_normal, L_tv = _normal_tv_loss(
-            gaussians._features_dc, knn_idx, normal_dot, style.style_normal_tau
-        )
-
+            rgb = F.interpolate(rgb[None], scale_factor=rs, mode="bilinear", align_corners=False)[0]
+        L_style = _routed_style_loss_per_view(extractor, rgb, route_map, banks, blocks, hard=not soft)
+        L_normal, L_tv = _normal_tv_loss(gaussians._features_dc, knn_idx,
+                                        normal_dot, style.style_normal_tau)
         loss = style.style_lambda * (L_style if L_style is not None else 0.0)
-        loss = (
-            loss + style.style_lambda_normal * L_normal + style.style_lambda_tv * L_tv
-        )
+        loss = loss + style.style_lambda_normal * L_normal + style.style_lambda_tv * L_tv
+        loss_value = float(loss.detach())
+        if not math.isfinite(loss_value):
+            raise RuntimeError(f"nonfinite stylization loss at iteration {it}")
 
         style_optimizer.zero_grad(set_to_none=True)
         loss.backward()
+        if locked_indices.numel():
+            for tensor in (gaussians._features_dc, gaussians._features_rest):
+                if tensor.grad is not None:
+                    tensor.grad.index_fill_(0, locked_indices, 0.0)
         style_optimizer.step()
 
         with torch.no_grad():
-            ema_loss = 0.4 * float(loss) + 0.6 * ema_loss
-            ema_style = (
-                0.4 * (float(L_style) if L_style is not None else 0.0) + 0.6 * ema_style
-            )
-            ema_normal = 0.4 * float(L_normal) + 0.6 * ema_normal
-            ema_tv = 0.4 * float(L_tv) + 0.6 * ema_tv
-            if it % 10 == 0:
-                progress.set_postfix(
-                    {
-                        "L": f"{ema_loss:.4f}",
-                        "style": f"{ema_style:.4f}",
-                        "normal": f"{ema_normal:.4f}",
-                        "tv": f"{ema_tv:.4f}",
-                        "Mem": f"{torch.cuda.memory_allocated() / (1024**2):.0f}M",
-                    }
-                )
-                progress.update(10)
+            style_value = float(L_style) if L_style is not None else 0.0
+            normal_value = float(L_normal)
+            tv_value = float(L_tv)
+            ema_loss = 0.4 * loss_value + 0.6 * ema_loss
+            ema_style = 0.4 * style_value + 0.6 * ema_style
+            ema_normal = 0.4 * normal_value + 0.6 * ema_normal
+            ema_tv = 0.4 * tv_value + 0.6 * ema_tv
+            if it == 1 or it % 10 == 0 or it == style.style_iterations:
+                stats = {"iteration": it, "loss": loss_value, "style": style_value,
+                         "normal": normal_value, "tv": tv_value}
+                training_stats["loss_history"].append(stats)
+                progress.set_postfix(L=f"{ema_loss:.4f}", style=f"{ema_style:.4f}",
+                                     normal=f"{ema_normal:.4f}", tv=f"{ema_tv:.4f}")
+                progress.update(it - progress.n)
     progress.close()
 
-    styled_dir = style_output_dir(dataset.model_path, final_styled_iter)
-    styled_ply = os.path.join(styled_dir, "point_cloud.ply")
-    gaussians.save_ply(styled_ply)
-    print(f"[style] ⑥ done: styled ply -> {styled_ply}")
-
-    del extractor, banks, knn_idx, normal_dot, pl_render
+    del extractor, banks, knn_idx, normal_dot, render_routes
     style_optimizer.state.clear()
+    if style.style_tone_strength > 0:
+        reference_boxes = {control.target_boxes.get(region)
+                           for region in trained_regions.nonzero().flatten().tolist()}
+        if len(reference_boxes) == 1:
+            reference_box = next(iter(reference_boxes))
+            with network_gui.lock:
+                training_stats["tone"] = calibrate_style_tone(
+                    gaussians, cameras, pipe, background, editable, Path(style.style_image),
+                    style.style_tone_strength, reference_box=reference_box)
+        else:
+            # One shared RGB offset cannot honor regions with different color targets.
+            training_stats["tone"] = {"status": "mixed_reference_boxes"}
+    _output_controlled_appearance(gaussians, dataset, style, control, trained_regions,
+                                  editable, strengths, base_blend, training_stats)
     if torch.cuda.is_available():
         torch.cuda.empty_cache()

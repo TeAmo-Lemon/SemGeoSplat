@@ -12,6 +12,7 @@ from tqdm import tqdm
 
 from gaussian_renderer import network_gui, render
 from scene import GaussianModel, Scene
+from semgeo_utils.general_utils import get_expon_lr_func
 
 
 def _resolve_start_ply(style):
@@ -19,9 +20,7 @@ def _resolve_start_ply(style):
         raise ValueError("Use only one of --start_ply or --start_pointcloud, not both")
     start_ply = style.start_ply or style.start_pointcloud
     if not start_ply:
-        raise ValueError(
-            "The refine stage requires --start_ply PATH/TO/point_cloud.ply"
-        )
+        raise ValueError("The refine stage requires --start_ply PATH/TO/point_cloud.ply")
     if not os.path.isfile(start_ply):
         raise FileNotFoundError(f"Could not find --start_ply file: {start_ply}")
     return start_ply
@@ -50,19 +49,31 @@ def _repair_loaded_ply_state(gaussians: GaussianModel, scene: Scene):
 
 def _select_importance_cameras(scene: Scene, importance_views):
     cameras = scene.getTrainCameras().copy()
-    if (
-        importance_views is None
-        or importance_views < 0
-        or importance_views >= len(cameras)
-    ):
+    if importance_views is None or importance_views < 0 or importance_views >= len(cameras):
         return cameras
     return cameras[:importance_views]
 
 
-def compute_importance_scores(
-    dataset, gaussians: GaussianModel, scene: Scene, pipe, background, style
-):
-    """Accumulate visibility and opacity-weighted importance over training views, with optional volume weighting."""
+def compute_importance_scores(dataset, gaussians: GaussianModel, scene: Scene,
+                              pipe, background, style):
+    """对每个高斯球计算重要性分数, 供 prune_for_refine 按分数排序剪枝.
+
+    计算流程:
+      1. 在 importance_views 张训练图上分别 rasterize, 收集每个高斯的
+         - visibility_score: 可见该高斯的视角数
+         - area_score: 各视角下投影面积平方和 (归一化到图像面积)
+      2. important_score = area_score * opacity (面积越大且越不透明 → 越重要)
+         若全零则降级为 visibility_score * opacity, 再全零则直接用 opacity.
+      3. (可选) 引入体积加权: 计算体积分位数 (P90) 作为基准,
+         volume_weight = (体积 / P90) ^ v_pow, 体积越大权重越高,
+         得到 volume_important_score, 倾向于保留大高斯.
+
+    返回根据 --prune_metric 选定的分数向量, 长度 = 高斯总数.
+
+    例: 某高斯在 80% 的视角中可见, 投影面积占画面 2%, opacity=0.8,
+        important_score = 0.02 * 0.8 = 0.016.
+        与其它高斯比较后, 分数最低的 prune_percent 比例被移除.
+    """
     cameras = _select_importance_cameras(scene, style.importance_views)
     n_points = gaussians.get_xyz.shape[0]
     visibility_score = torch.zeros(n_points, device="cuda")
@@ -73,10 +84,7 @@ def compute_importance_scores(
         with network_gui.lock:
             with torch.no_grad():
                 render_pkg = render(
-                    viewpoint_cam,
-                    gaussians,
-                    pipe,
-                    background,
+                    viewpoint_cam, gaussians, pipe, background,
                     use_trained_exp=dataset.train_test_exp,
                     no_densify_hook=True,
                     return_info=True,
@@ -112,37 +120,32 @@ def compute_importance_scores(
     raise ValueError(f"Unsupported prune metric: {style.prune_metric}")
 
 
-def prune_for_refine(
-    dataset,
-    gaussians: GaussianModel,
-    scene: Scene,
-    pipe,
-    background,
-    style,
-    iteration,
-    prune_percent,
-):
-    """Prune the lowest-importance Gaussians while retaining at least min_gaussians."""
+def prune_for_refine(dataset, gaussians: GaussianModel, scene: Scene,
+                     pipe, background, style, iteration, prune_percent):
+    """在 refine 过程中执行一次剪枝.
+
+    流程:
+      1. 计算所有高斯的"重要性分数"(compute_importance_scores).
+      2. 按 prune_percent 比例剪掉分数最低的高斯, 至少保留 min_gaussians 个.
+      3. 打印剪枝前后高斯数量.
+
+    例: prune_percent=0.3 → 保留重要性分数排前 70% 的高斯,
+        移除后 30% (但不会让总数低于 min_gaussians).
+    """
     before = gaussians.get_xyz.shape[0]
     if prune_percent <= 0:
-        print(
-            f"Skipping pruning at iteration {iteration} because prune_percent={prune_percent}"
-        )
+        print(f"Skipping pruning at iteration {iteration} because prune_percent={prune_percent}")
         return
 
-    score = compute_importance_scores(
-        dataset, gaussians, scene, pipe, background, style
-    )
+    score = compute_importance_scores(dataset, gaussians, scene, pipe, background, style)
     with network_gui.lock:
         pruned = gaussians.prune_gaussians(
-            prune_percent, score, min_keep=style.min_gaussians
-        )
+            prune_percent, score, min_keep=style.min_gaussians)
     after = gaussians.get_xyz.shape[0]
     print(
         f"[ITER {iteration}] Refine pruning: metric={style.prune_metric}, "
         f"percent={prune_percent}, pruned={pruned}, "
-        f"gaussians={before}->{after}"
-    )
+        f"gaussians={before}->{after}")
 
 
 def _release_camera_gpu_tensors(scene: Scene):
@@ -174,20 +177,13 @@ def _release_camera_images_tensors(scene: Scene):
     torch.cuda.empty_cache()
     return freed_bytes
 
-
 def _release_training_grads(gaussians: GaussianModel):
     """清掉最后一 iter 遗留的 .grad. 只处理参数本身的 .grad 张量,
     optimizer 内部的动量 state 由 _release_optimizer_state 单独处理."""
     freed_bytes = 0
-    params = [
-        gaussians._xyz,
-        gaussians._features_dc,
-        gaussians._features_rest,
-        gaussians._opacity,
-        gaussians._scaling,
-        gaussians._rotation,
-        getattr(gaussians, "_exposure", None),
-    ]
+    params = [gaussians._xyz, gaussians._features_dc, gaussians._features_rest,
+              gaussians._opacity, gaussians._scaling, gaussians._rotation,
+              getattr(gaussians, "_exposure", None)]
     for p in params:
         if p is not None and p.grad is not None:
             freed_bytes += p.grad.numel() * p.grad.element_size()
@@ -202,10 +198,8 @@ def _release_optimizer_state(gaussians: GaussianModel):
     对 N ~ 1M 高斯量级约 1 GB+, 是训练结束后残留显存里最大的一块.
     后续 stage 会重新调 training_setup 建 optimizer, 旧 state 无需保留."""
     freed_bytes = 0
-    for opt in (
-        getattr(gaussians, "optimizer", None),
-        getattr(gaussians, "exposure_optimizer", None),
-    ):
+    for opt in (getattr(gaussians, "optimizer", None),
+                getattr(gaussians, "exposure_optimizer", None)):
         if opt is None:
             continue
         for state in opt.state.values():
@@ -234,16 +228,32 @@ def _release_exposure(gaussians: GaussianModel):
 
 
 def _prune_schedule(style, prune_iterations):
-    """Return sorted pruning iterations from an explicit schedule or the configured interval."""
+    """返回 prune 发生的 iteration 列表 (升序).
+
+    两种模式:
+      1) 显式指定 --prune_iterations (如 "500 1000 1500") → 去重排序后直接返回.
+      2) 自动生成: 从 prune_from_iter 起, 每隔 prune_interval 步一次,
+         直到 refine_iterations 为止.
+
+    例: prune_interval=300, prune_from_iter=600, refine_iterations=1500
+        → [600, 900, 1200, 1500]
+    """
     if prune_iterations:
         return sorted(set(prune_iterations))
     if style.prune_interval <= 0:
         return []
-    return list(
-        range(style.prune_from_iter, style.refine_iterations + 1, style.prune_interval)
-    )
+    return list(range(style.prune_from_iter, style.refine_iterations + 1, style.prune_interval))
 
 
 def _prune_percent_for_schedule_index(style, schedule_index):
-    """Apply prune_decay to the initial pruning fraction for the given zero-based round."""
-    return style.prune_percent * (style.prune_decay**schedule_index)
+    """返回第 schedule_index 轮 (0‑based) 的 prune 比例.
+
+    公式:  prune_percent * (prune_decay ** schedule_index)
+
+    例: prune_percent=0.5, prune_decay=0.7
+        第 0 轮 → 0.5          (第一次剪掉 50% 的低重要性高斯)
+        第 1 轮 → 0.5*0.7=0.35 (剪 35%)
+        第 2 轮 → 0.5*0.49≈0.25
+        后期逐渐衰减, 避免过度剪枝.
+    """
+    return style.prune_percent * (style.prune_decay ** schedule_index)
