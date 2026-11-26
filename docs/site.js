@@ -117,7 +117,9 @@
     pendingFrame = null;
   }
   orbitVideo.addEventListener('pause', () => {
-    if (orbitVideo.paused) stopOrbitPaint();
+    if (!orbitVideo.paused) return;
+    stopOrbitPaint();
+    drawOrbit();
   });
   orbitVideo.addEventListener('loadeddata', drawOrbit);
   orbitVideo.addEventListener('loadedmetadata', () => {
