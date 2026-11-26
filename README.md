@@ -89,16 +89,16 @@ Use the exact reference file that produced `style_primitives.pt`. To make `outsi
 
 ## Isolate the Kitchen loader
 
-The website uses region 2 of the refined Kitchen partition. We estimate the tabletop from nearby Gaussians assigned to other regions, remove splats in the support layer and keep the main connected component. This leaves 72,481 of the 76,183 Gaussians in region 2. The original and LEGO-styled orbits use the same point indices and camera path.
+The loader comes from region 2 of the refined Kitchen reconstruction. The tabletop fit and connected-component filter isolate the body. At the contact surface, the original Gaussians leave gaps in the lower track runs. For the project-page orbit, we trim splats that cross the support plane and complete both lower runs with four measured upper tread links repeated along the wheel paths. The original and LEGO versions share this completed geometry and orbit. Each uses the donor links' appearance from its own checkpoint.
 
 ```bash
 python -m scripts.render_object_orbit \
   --source "$REFINE/point_cloud.ply" --regions /path/to/kitchen/regions.pt --region 2 \
-  --recipe configs/kitchen-loader.json --output output/kitchen-loader.gif \
-  --export-ply output/kitchen-loader.ply
+  --recipe configs/kitchen-loader.json --restore-loader-tracks \
+  --output output/kitchen-loader.gif --export-ply output/kitchen-loader.ply
 ```
 
-Add `--appearance /path/to/kitchen-style-133/point_cloud.ply` and choose new output paths to render the appearance fitted to the full LEGO brick reference. Use the region sidecar for the reconstruction on which you selected the loader. Numbering can differ between partitions, including the older style-133 training partition. The script checks the ordered geometry and uses the recipe to position the orbit camera. Omitting `--regions` and `--region` selects the earlier manually calibrated crop.
+To render the LEGO version, add `--appearance /path/to/kitchen-style-133/point_cloud.ply` and set new output paths. The loader recipe checks the ordered source coordinates and region 2 membership against the original partition. Other partitions can assign region 2 to a different object. Omit `--restore-loader-tracks` to render the observed region after tabletop removal. Omitting both region arguments selects the earlier manually calibrated crop.
 
 ## Project page and attribution
 

@@ -1,8 +1,10 @@
 """Isolate a set of 3D Gaussians and render a white-background camera orbit."""
 
 import argparse
+import hashlib
 import json
 import math
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -14,6 +16,12 @@ from plyfile import PlyData, PlyElement
 from scipy import ndimage
 from scipy.spatial import cKDTree
 
+# Direct script execution should resolve the same project modules as python -m.
+if __package__ in (None, ''):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from scripts.loader_contacts import apply_loader_contacts, limit_contact_edges, plan_loader_contacts
+from scripts.loader_treads import apply_tread_plan, make_tread_plan
 from gaussian_renderer import GaussianModel, render
 from scene.cameras import MiniCam
 from semgeo_utils.graphics_utils import getProjectionMatrix
@@ -107,15 +115,23 @@ def support_heights(background, foreground, tolerance):
     return heights, np.quantile(slab, 0.97)
 
 
-def select_supported_region(vertices, cache_path, region):
+def select_supported_region(vertices, cache_path, region, track_contacts=None):
     """Keep the connected foreground above the support of a saved 3D region."""
     cache = torch.load(cache_path, map_location='cpu', weights_only=True)
     labels = np.asarray(cache['cluster_labels'])
-    if labels.shape != (len(vertices),) or regions_xyz_fingerprint(cache, cache_path) != xyz_fingerprint(vertices):
+    fingerprint = xyz_fingerprint(vertices)
+    if labels.shape != (len(vertices),) or regions_xyz_fingerprint(cache, cache_path) != fingerprint:
         raise ValueError('The saved region labels must match the ordered source Gaussians')
     if region < 0 or region >= cache['num_regions']:
         raise ValueError('Choose a region ID from the saved source partition')
     ids = np.flatnonzero(labels == region)
+    if track_contacts is not None:
+        # Region IDs are local to each partition. A different R2 in the same
+        # reconstruction can still pass the ordinary coordinate alignment check.
+        membership = hashlib.sha256(ids.astype('<i8', copy=False).tobytes()).hexdigest()
+        if (region != track_contacts['region'] or fingerprint != track_contacts['source_xyz_fingerprint']
+                or membership != track_contacts['region_indices_sha256']):
+            raise ValueError('The track repair requires the calibrated Kitchen geometry and loader region')
     if len(ids) < 3:
         raise ValueError('The selected region has too few Gaussians')
 
@@ -209,6 +225,8 @@ def main():
     parser.add_argument('--recipe', type=Path, required=True)
     parser.add_argument('--regions', type=Path, help='Saved region partition for a foreground object on a planar support')
     parser.add_argument('--region', type=int, help='Region to isolate and clean using neighboring background geometry')
+    parser.add_argument('--restore-loader-tracks', action='store_true',
+                        help="Repair the Kitchen loader's ground-contact runs from its measured upper links")
     parser.add_argument('--output', type=Path, required=True, help='Destination GIF')
     parser.add_argument('--export-ply', type=Path, help='Save the isolated Gaussian model')
     parser.add_argument('--frames', type=int, default=72)
@@ -220,6 +238,8 @@ def main():
         parser.error('Frame count and dimensions must be positive, and FPS must be in [1, 100]')
     if (args.region is None) != (args.regions is None):
         parser.error('--regions and --region must be provided together')
+    if args.restore_loader_tracks and args.regions is None:
+        parser.error('--restore-loader-tracks requires --regions and --region')
     inputs = {path.resolve() for path in (args.source, args.appearance, args.recipe, args.regions) if path}
     if args.regions is not None:
         inputs.add(args.regions.with_name('point_cloud.ply').resolve())
@@ -227,9 +247,12 @@ def main():
     if inputs.intersection(outputs) or len(set(outputs)) != len(outputs):
         parser.error('Use a different path for each output and each input')
     recipe = json.loads(args.recipe.read_text())
+    contacts = recipe.get('track_contacts') if args.restore_loader_tracks else None
+    if args.restore_loader_tracks and (not contacts or args.region != contacts.get('region')):
+        parser.error('--restore-loader-tracks requires the calibrated Kitchen loader recipe and region ID')
     original = PlyData.read(args.source, mmap='r')['vertex'].data
     chosen = (select_vertices(original, recipe) if args.regions is None
-              else select_supported_region(original, args.regions, args.region))
+              else select_supported_region(original, args.regions, args.region, contacts))
     vertices = original
     if args.appearance:
         vertices = PlyData.read(args.appearance, mmap='r')['vertex'].data
@@ -240,6 +263,14 @@ def main():
             not np.array_equal(original[key], vertices[key]) for key in fields
         ):
             raise ValueError('Appearance checkpoint does not share the source geometry')
+    if args.restore_loader_tracks:
+        contact_plan = plan_loader_contacts(original, chosen, recipe)
+        source_contacts = apply_loader_contacts(original, contact_plan)
+        appearance_contacts = source_contacts if vertices is original else apply_loader_contacts(vertices, contact_plan)
+        tread_plan = make_tread_plan(source_contacts, recipe)
+        isolated = limit_contact_edges(apply_tread_plan(appearance_contacts, tread_plan), recipe)
+    else:
+        isolated = vertices[chosen]
     rest = sum(key.startswith('f_rest_') for key in vertices.dtype.names)
     degree = math.isqrt(1 + rest // 3) - 1
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -247,7 +278,7 @@ def main():
         folder = Path(temp)
         ply = args.export_ply or folder / 'object.ply'
         ply.parent.mkdir(parents=True, exist_ok=True)
-        PlyData([PlyElement.describe(vertices[chosen], 'vertex')], text=False).write(ply)
+        PlyData([PlyElement.describe(isolated, 'vertex')], text=False).write(ply)
         model = GaussianModel(degree)
         model.load_ply(str(ply))
         white = torch.ones(3, device='cuda')
@@ -264,7 +295,7 @@ def main():
                 frame.save(path)
                 frames.append(path)
         write_gif(frames, args.output, args.fps)
-    print(f'Saved {args.frames} views of {len(chosen):,} Gaussians to {args.output}')
+    print(f'Saved {args.frames} views of {len(isolated):,} Gaussians to {args.output}')
 
 
 if __name__ == '__main__':

@@ -82,5 +82,57 @@
       0.032
     ]
   ],
-  "contact_max_rgb": 0.49
+  "contact_max_rgb": 0.49,
+  "track_contacts": {
+    "region": 2,
+    "source_xyz_fingerprint": "c7c060b4119cea717f34accfd059c70a",
+    "region_indices_sha256": "f58f85b42c5d78decfc73d99ca8dbcd50a3cd939c363c36d917097ca56c9d250",
+    "axle_positions": [
+      -0.28,
+      0.45
+    ],
+    "wheel_radius": 0.173,
+    "max_arc_offset": 0.17,
+    "across_ranges": [
+      [
+        -0.497,
+        -0.306
+      ],
+      [
+        0.162,
+        0.35
+      ]
+    ],
+    "covariance_across_ranges": [
+      [
+        -0.5,
+        -0.303
+      ],
+      [
+        0.16,
+        0.353
+      ]
+    ],
+    "chassis_front": -0.58,
+    "edge_envelope": {
+      "center_offsets": [
+        -0.405,
+        0.26
+      ],
+      "along_pivot": 0.05,
+      "across_drift": 0.015,
+      "half_width": 0.083,
+      "axle_positions": [
+        -0.278,
+        0.441
+      ],
+      "wheel_radius": 0.166,
+      "contact_height": 0.021,
+      "right_height_offset": 0.002,
+      "lower_run_extent": [
+        -0.525,
+        0.686
+      ]
+    }
+  }
 }
