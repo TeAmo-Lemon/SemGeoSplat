@@ -2,7 +2,7 @@
 
 Stylize a 3D Gaussian scene from one reference image. Semantic and geometric regions connect the scene to patches of the reference through fused Gromov–Wasserstein (FGW) transport. The same edit can be rendered from multiple cameras.
 
-[Visual examples](docs/index.html) · [Kitchen LEGO brick orbit](docs/media/kitchen-orbit-stylized.gif) · [FGW texture placement on Flower](docs/media/flower-control.gif)
+[Visual examples](https://teamo-lemon.github.io/SemGeoSplat/) · [Kitchen LEGO brick orbit](https://teamo-lemon.github.io/SemGeoSplat/#orbit) · [FGW texture placement on Flower](https://teamo-lemon.github.io/SemGeoSplat/#flower-control)
 
 ## Install
 

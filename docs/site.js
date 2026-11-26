@@ -165,6 +165,7 @@
     const title = preview.querySelector('#preview-title');
     const content = preview.querySelector('.preview-content');
     let opener = null;
+    let openingScroll = null;
 
     function show(link) {
       if (preview.open) return;
@@ -191,6 +192,7 @@
       }
 
       opener = link;
+      openingScroll = history.state?.semgeoScroll || [window.scrollX, window.scrollY];
       content.replaceChildren(media);
       preview.showModal();
       updateMotion();
@@ -207,8 +209,18 @@
       }
       content.replaceChildren();
       preview.close();
-      opener?.focus({preventScroll: true});
+      const link = opener;
+      const [left, top] = openingScroll;
       opener = null;
+      openingScroll = null;
+      link.focus({preventScroll: true});
+      // History traversal can refocus the document and scroll to its fragment
+      // after popstate. Restore the opening view once that traversal finishes.
+      requestAnimationFrame(() => {
+        if (preview.open || (document.activeElement !== document.body && document.activeElement !== link)) return;
+        link.focus({preventScroll: true});
+        window.scrollTo({left, top, behavior: 'instant'});
+      });
       updateMotion();
     }
 
@@ -238,7 +250,7 @@
         if (preview.open) return;
         // A same-URL entry makes browser Back dismiss the modal and Forward reopen it.
         try {
-          history.pushState({...history.state, semgeoMedia: index}, '');
+          history.pushState({...history.state, semgeoMedia: index, semgeoScroll: [window.scrollX, window.scrollY]}, '');
         } catch {
           // Some file viewers disable history operations. The Close button still works.
         }
