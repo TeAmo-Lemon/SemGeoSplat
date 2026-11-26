@@ -237,6 +237,10 @@ figcaption,.small {
   aspect-ratio: 640/410;
 }
 
+#flower-control .media-box {
+  aspect-ratio: 640/512;
+}
+
 .control:not(.control-lead) .control-copy {
   padding-top: 14px;
 }
@@ -454,9 +458,6 @@ footer .wrap {
   padding: 4px;
   border-radius: 3px;
   cursor: pointer;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.4;
 }
 
 #style-options input {
@@ -477,15 +478,6 @@ footer .wrap {
 #style-options input:checked + img {
   outline: 2px solid var(--link);
   outline-offset: 2px;
-}
-
-#style-options span {
-  margin-top: 4px;
-}
-
-#style-options input:checked ~ span {
-  color: var(--ink);
-  font-weight: bold;
 }
 
 #style-options input:focus-visible + img {

@@ -17,6 +17,54 @@
     ? 'https://raw.githubusercontent.com/TeAmo-Lemon/SemGeoSplat/9c50d278e4641bb691e9c90503314c7447c1ef64/docs/media/gallery'
     : '../gallery-videos';
   const sources = new Map();
+  const referenceDescriptions = {
+    2: 'Hand holding a reflective sphere',
+    3: 'Watercolor leaves in many colors',
+    5: 'Seated figure beside a vase in a green room',
+    6: 'Woman framed by circular stained-glass patterns',
+    7: 'Bird mosaic in earth tones',
+    8: 'Pencil portrait of a woman',
+    9: 'Angular portrait on an ochre ground',
+    10: 'Rainy street with umbrellas and colorful lights',
+    11: 'Portrait against multicolored square brushstrokes',
+    12: 'Angular blue-gray figures',
+    14: 'Swirling blue night sky with bright stars',
+    16: 'Looping black ink lines',
+    19: 'Cresting blue wave',
+    24: 'Rocky landscape drawn in black ink',
+    25: 'Portrait behind a web of dark lines',
+    30: 'Boats in a harbor below a hillside town',
+    31: 'Bright abstract shapes on a violet ground',
+    32: 'Blue animal in a snowy landscape',
+    35: 'Color blocks crossed by angular dark outlines',
+    39: 'Long-faced figure in a green striped shirt',
+    48: 'Sepia portrait of a seated man',
+    50: 'Stone bridge painted in pink and violet',
+    54: 'Abstract faces in pink, green and orange',
+    59: 'Beach dotted with colorful umbrellas',
+    63: 'Elongated brown figure on a pale textured ground',
+    64: 'Faces and handwritten diagrams on a yellow ground',
+    76: 'Interlocking pink, blue and gray shapes',
+    77: 'Black figures and lettering on a brown ground',
+    79: 'Fine hanging lines on a pale blue ground',
+    87: 'Rounded pink and yellow shapes with curling green lines',
+    89: 'Intertwined red and blue figures',
+    94: 'Black crown on a tan ground',
+    99: 'Loose figure studies in red and green',
+    111: 'Red standing figure beside writing and a crown',
+    114: 'Broad black and red brushstrokes',
+    119: 'White outlined forms and orange spirals',
+    120: 'Pen drawing of a man wearing glasses',
+    121: 'Wall of irregular tan and gray stones',
+    123: 'Frost crystals on pale blue',
+    128: 'Illustrated playground with trees and benches',
+    132: 'Wall of narrow multicolored bricks',
+    133: 'Multicolored LEGO bricks',
+    135: 'Snowy landscape with a gate and bare trees',
+    137: 'A dark overhanging tree above blue water',
+    138: 'A glowing cat-shaped bus at night',
+    140: 'Pastel town scene in pink, blue and yellow',
+  };
 
   function clearSource(video) {
     const previous = sources.get(video);
@@ -98,30 +146,32 @@
   function showStyle(style, updateUrl) {
     const scene = select.selectedOptions[0];
     const directory = 'media/gallery/' + scene.value;
-    const videoDirectory = videoRoot + '/' + scene.value;
+    const framed = scene.hasAttribute('data-framed');
+    const version = framed ? '?v=framed1' : '';
+    const videoDirectory = framed ? directory : videoRoot + '/' + scene.value;
+    const clip = name => videoDirectory + '/' + name + '.mp4' + version;
     for (const video of videos) {
       const isOriginal = video === original;
       const name = isOriginal ? 'original' : style;
-      const url = videoDirectory + '/' + name + '.mp4';
+      const url = clip(name);
       clearSource(video);
       sources.set(video, {url, controller: null, blobUrl: null});
       video.pause();
       video.preload = 'none';
-      video.poster = directory + '/' + name + '.jpg';
+      video.poster = directory + '/' + name + '.jpg' + version;
       video.src = url;
-      video.setAttribute('aria-label', isOriginal ? 'Original ' + scene.text : scene.text + ' rendered with reference ' + style);
+      video.setAttribute('aria-label', (isOriginal ? 'Original ' : 'Stylized ') + scene.text + ' scene');
       video.load();
     }
     const referencePath = 'media/gallery/styles/' + style + '.jpg';
     reference.src = referencePath;
-    reference.alt = 'Style reference ' + style;
+    reference.alt = referenceDescriptions[style] || 'Selected style reference';
     document.querySelector('#reference-link').href = referencePath;
-    document.querySelector('#reference-label').textContent = 'Reference ' + style;
 
     const originalGif = Boolean(scene.dataset.gifStyle);
     const styleGif = scene.dataset.gifStyle === style;
-    setLink('original-link', originalGif ? 'media/' + scene.value + '-original.gif' : videoDirectory + '/original.mp4', originalGif ? 'Open GIF' : 'Open clip');
-    setLink('styled-link', styleGif ? 'media/' + scene.value + '-scene.gif' : videoDirectory + '/' + style + '.mp4', styleGif ? 'Open GIF' : 'Open clip');
+    setLink('original-link', originalGif ? 'media/' + scene.value + '-original.gif' + version : clip('original'), originalGif ? 'Open GIF' : 'Open clip');
+    setLink('styled-link', styleGif ? 'media/' + scene.value + '-scene.gif' + version : clip(style), styleGif ? 'Open GIF' : 'Open clip');
     if (updateUrl && location.protocol !== 'file:') {
       const url = new URL(location.href);
       url.searchParams.set('scene', scene.value);
@@ -144,18 +194,17 @@
       radio.name = 'reference';
       radio.value = id;
       radio.checked = id === selected;
-      radio.setAttribute('aria-label', 'Reference ' + id);
+      radio.setAttribute('aria-label', referenceDescriptions[id] || 'Style reference');
       const image = document.createElement('img');
       image.src = 'media/gallery/styles/' + id + '.jpg';
       image.alt = '';
-      const number = document.createElement('span');
-      number.textContent = id;
-      label.append(radio, image, number);
+      label.append(radio, image);
       choices.append(label);
     }
     picker.replaceChildren(choices);
     document.querySelector('#dataset').textContent = scene.dataset.dataset;
     showStyle(selected, updateUrl);
+    return selected;
   }
 
   function enablePreview() {
@@ -299,9 +348,18 @@
     if (!event.persisted) videos.forEach(clearSource);
   });
 
-  const query = new URLSearchParams(location.search);
-  if ([...select.options].some(option => option.value === query.get('scene'))) select.value = query.get('scene');
-  chooseScene(query.get('style'), false);
+  const initialUrl = new URL(location.href);
+  const requestedScene = initialUrl.searchParams.get('scene');
+  const requestedStyle = initialUrl.searchParams.get('style');
+  const sceneAvailable = [...select.options].some(option => option.value === requestedScene);
+  if (sceneAvailable) select.value = requestedScene;
+  const selectedStyle = chooseScene(requestedScene && !sceneAvailable ? null : requestedStyle, false);
+  const removedSelection = (requestedScene && !sceneAvailable) || (requestedStyle && requestedStyle !== selectedStyle);
+  if (removedSelection && location.protocol !== 'file:') {
+    initialUrl.searchParams.set('scene', select.value);
+    initialUrl.searchParams.set('style', selectedStyle);
+    history.replaceState(history.state, '', initialUrl);
+  }
   document.querySelector('.scene-picker').hidden = false;
   document.querySelector('.style-picker').hidden = false;
   enablePreview();

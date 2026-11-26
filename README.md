@@ -102,8 +102,8 @@ To render the LEGO version, add `--appearance /path/to/kitchen-style-133/point_c
 
 ## Project page and attribution
 
-The scene selector covers twelve scenes. Each reference thumbnail selects a stylized result rendered on the original camera path.
+The scene selector covers nine scenes. Each reference thumbnail selects a stylized result rendered on the original camera path.
 
 Open [docs/index.html](docs/index.html) directly, or run `python -m http.server 8000` from the repository root and visit `http://localhost:8000/docs/`.
 
-The implementation builds on the Graphdeco reconstruction code, gsplat rasterization and DINOv3 features. The gallery uses Mip-NeRF 360 and LLFF scenes. Upstream reconstruction evaluation is available through `metrics.py` and `full_eval.py`. The repository retains the Graphdeco license. [3D Gaussian Splatting](https://github.com/graphdeco-inria/gaussian-splatting) · [gsplat](https://github.com/nerfstudio-project/gsplat) · [DINOv3](https://github.com/facebookresearch/dinov3) · [License](LICENSE.md)
+The implementation builds on the Graphdeco reconstruction code, gsplat rasterization and DINOv3 features. The gallery uses scenes from Mip-NeRF 360, LLFF, and Tanks and Temples. Upstream reconstruction evaluation is available through `metrics.py` and `full_eval.py`. The repository retains the Graphdeco license. [3D Gaussian Splatting](https://github.com/graphdeco-inria/gaussian-splatting) · [gsplat](https://github.com/nerfstudio-project/gsplat) · [DINOv3](https://github.com/facebookresearch/dinov3) · [License](LICENSE.md)
