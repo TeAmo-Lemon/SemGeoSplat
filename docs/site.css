@@ -272,14 +272,94 @@ figcaption,.small {
 
 .orbit-grid {
   display: grid;
-  grid-template-columns: minmax(0, 37.5rem) minmax(7rem, 10rem);
+  grid-template-columns: minmax(0, 37.5rem) minmax(15rem, 20rem);
   gap: clamp(20px, 5vw, 64px);
   align-items: center;
   justify-content: center;
 }
 
-.orbit-grid .reference .media-box {
+.orbit-styles-panel {
+  min-width: 0;
+}
+
+#orbit-styles {
+  margin: 0 0 18px;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+#orbit-styles legend {
+  margin-bottom: 9px;
+  padding: 0;
+  font-weight: 600;
+}
+
+.orbit-choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.orbit-choices label {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  padding: 5px 4px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: .875rem;
+  cursor: pointer;
+}
+
+.orbit-choices input {
+  position: absolute;
+  opacity: 0;
+}
+
+.orbit-choices label:has(input:checked) {
+  border-color: var(--link);
+  box-shadow: inset 0 0 0 1px var(--link);
+}
+
+.orbit-choices label:focus-within {
+  outline: 2px dashed var(--link);
+  outline-offset: 2px;
+}
+
+.orbit-sample {
+  width: min(100%, 5.7rem);
+  aspect-ratio: 480 / 368;
+  overflow: hidden;
+}
+
+.orbit-sample img {
+  display: block;
+  width: 200%;
+  margin-left: -100%;
+}
+
+.orbit-reference {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.orbit-reference .media-box {
+  flex: 0 0 5.5rem;
+  height: 4.5rem;
   background: transparent;
+}
+
+.orbit-reference figcaption {
+  display: grid;
+  gap: 1px;
+  padding: 0;
+  font-size: .875rem;
+}
+
+.orbit-reference cite {
+  color: var(--ink);
 }
 
 #orbit-mount {
@@ -308,7 +388,7 @@ figcaption,.small {
   position: relative;
   z-index: 1;
   background: white;
-  --split: 50%;
+  --split: 30%;
 }
 
 .orbit-stage {
@@ -334,7 +414,7 @@ figcaption,.small {
 
 .orbit-poster,
 .orbit-poster::after {
-  background: white url('media/kitchen-orbit-pair.jpg') left center / 200% 100% no-repeat;
+  background: white var(--orbit-poster, url('media/kitchen-loader-gouache-pair.jpg')) left center / 200% 100% no-repeat;
 }
 
 .orbit-poster::after {
@@ -442,10 +522,9 @@ figcaption,.small {
 
 @media (max-width: 650px) {
   .orbit-grid { grid-template-columns: 1fr; gap: 16px; }
-  .orbit-grid .reference { display: flex; align-items: center; gap: 10px; }
-  .orbit-grid .reference .media-box { width: 54px; height: 54px; }
-  .orbit-grid .reference img { max-height: 54px; }
-  .orbit-grid .reference figcaption { padding: 0; }
+  .orbit-choices { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .orbit-choices label { text-align: center; line-height: 1.2; }
+  .orbit-reference .media-box { flex-basis: 4.5rem; height: 3.5rem; }
 }
 
 footer {

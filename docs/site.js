@@ -71,6 +71,9 @@
   const orbitOpen = document.querySelector('#orbit-open');
   const orbitVideo = document.querySelector('#orbit-video');
   const slider = document.querySelector('#orbit-range');
+  const orbitStyles = document.querySelector('#orbit-styles');
+  const orbitName = document.querySelector('#orbit-style-name');
+  let pendingOrbitTime = null;
   const canvas = document.querySelector('#orbit-canvas');
   const context = canvas.getContext('2d');
 
@@ -87,7 +90,7 @@
   function updateSplit() {
     const percent = slider.valueAsNumber;
     orbit.style.setProperty('--split', percent + '%');
-    slider.setAttribute('aria-valuetext', percent + '% original, ' + (100 - percent) + '% LEGO');
+    slider.setAttribute('aria-valuetext', percent + '% original, ' + (100 - percent) + '% ' + orbitName.textContent);
     const labels = orbit.querySelector('.orbit-labels').children;
     labels[0].style.visibility = percent === 0 ? 'hidden' : '';
     labels[1].style.visibility = percent === 100 ? 'hidden' : '';
@@ -107,14 +110,48 @@
   orbitVideo.addEventListener('playing', () => {
     if (pendingFrame === null) paintOrbit();
   });
-  orbitVideo.addEventListener('pause', () => {
+  function stopOrbitPaint() {
     if (pendingFrame === null) return;
     if (hasVideoClock) orbitVideo.cancelVideoFrameCallback(pendingFrame);
     else cancelAnimationFrame(pendingFrame);
     pendingFrame = null;
-    drawOrbit();
+  }
+  orbitVideo.addEventListener('pause', () => {
+    if (orbitVideo.paused) stopOrbitPaint();
   });
   orbitVideo.addEventListener('loadeddata', drawOrbit);
+  orbitVideo.addEventListener('loadedmetadata', () => {
+    if (pendingOrbitTime !== null && Number.isFinite(orbitVideo.duration)) {
+      orbitVideo.currentTime = pendingOrbitTime % orbitVideo.duration;
+      pendingOrbitTime = null;
+    }
+  });
+  orbitVideo.addEventListener('seeked', drawOrbit);
+
+  function selectOrbitStyle(input) {
+    const label = input.labels[0];
+    const name = label.querySelector('.orbit-name').textContent;
+    const poster = label.querySelector('img').getAttribute('src');
+    pendingOrbitTime ??= orbitVideo.currentTime;
+    orbitVideo.pause();
+    stopOrbitPaint();
+    context?.clearRect(0, 0, canvas.width, canvas.height);
+    orbit.style.setProperty('--orbit-poster', 'url("' + poster + '")');
+    orbitName.textContent = name;
+    orbit.querySelector('.orbit-stage').setAttribute('aria-label',
+      'Kitchen loader with its original appearance on the left and ' + name + ' on the right');
+    for (const figure of document.querySelectorAll('[data-orbit-credit]')) {
+      figure.hidden = figure.dataset.orbitCredit !== input.value;
+    }
+    orbitVideo.src = input.dataset.video;
+    orbitVideo.preload = pendingOrbitTime > 0 ? 'auto' : 'none';
+    orbitVideo.load();
+    updateSplit();
+    updateOrbitMotion();
+  }
+
+  orbitStyles.addEventListener('change', event => selectOrbitStyle(event.target));
+  orbitStyles.hidden = false;
   slider.hidden = false;
   orbit.querySelector('.orbit-handle').hidden = false;
   slider.addEventListener('input', updateSplit);
@@ -311,7 +348,7 @@
       opener = link;
       openingScroll = history.state?.semgeoScroll || [window.scrollX, window.scrollY];
       if (link === orbitOpen) {
-        title.textContent = 'Kitchen loader comparison';
+        title.textContent = 'Kitchen loader · ' + orbitName.textContent;
         orbitMount.style.height = orbitMount.offsetHeight + 'px';
         content.replaceChildren(orbit);
       } else {
@@ -439,6 +476,9 @@
   }
   document.querySelector('.scene-picker').hidden = false;
   document.querySelector('.style-picker').hidden = false;
+  const initialOrbitStyle = orbitStyles.querySelector(':checked');
+  if (initialOrbitStyle.dataset.video !== orbitVideo.getAttribute('src')) selectOrbitStyle(initialOrbitStyle);
+  updateSplit();
   enablePreview();
   updateMotion();
 })();

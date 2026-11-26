@@ -6,8 +6,8 @@
   <meta name="description" content="SemGeoSplat. Scene stylization, regional texture controls, and novel views rendered from 3D Gaussians.">
   <title>SemGeoSplat · Controllable 3D Gaussian stylization</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="site.css?v=orbit-compare1">
-  <script defer src="site.js?v=orbit-compare1"></script>
+  <link rel="stylesheet" href="site.css?v=loader-styles1">
+  <script defer src="site.js?v=loader-styles1"></script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to results</a>
@@ -21,18 +21,18 @@
       <p class="subtitle">Controllable 3D Gaussian stylization with semantic regions and fused Gromov–Wasserstein transport</p>
     </div>
     <section id="orbit" aria-labelledby="orbit-title">
-      <div class="section-head"><h2 id="orbit-title">Kitchen · LEGO brick stylization</h2></div>
-      <p class="section-description">Drag the divider to compare the original loader with its LEGO stylization. Both use the same geometry from Kitchen region 2, with the lower tracks completed from four upper tread links.</p>
+      <div class="section-head"><h2 id="orbit-title">Kitchen · Isolated loader</h2></div>
+      <p class="section-description">Choose a style and drag the divider to compare it with the original. Each orbit uses the same loader from Kitchen region 2. The lower tracks are reconstructed from four upper tread links.</p>
       <div class="orbit-grid">
         <div id="orbit-mount">
-          <video id="orbit-video" src="media/kitchen-orbit-pair.mp4" muted playsinline loop preload="none" aria-hidden="true"></video>
+          <video id="orbit-video" src="media/kitchen-loader-gouache-pair.mp4" muted playsinline loop preload="none" aria-hidden="true"></video>
           <div id="orbit-panel">
-            <div class="orbit-stage" role="group" aria-label="Kitchen loader with its original appearance on the left and LEGO stylization on the right">
+            <div class="orbit-stage" role="group" aria-label="Kitchen loader with its original appearance on the left and Gouache on the right">
               <div class="orbit-poster" aria-hidden="true"></div>
               <canvas id="orbit-canvas" width="480" height="368" aria-hidden="true"></canvas>
-              <span class="orbit-labels" aria-hidden="true"><span>Original</span><span>LEGO</span></span>
+              <span class="orbit-labels" aria-hidden="true"><span>Original</span><span id="orbit-style-name">Gouache</span></span>
               <span class="orbit-divider" aria-hidden="true"><span class="orbit-handle" hidden></span></span>
-              <input id="orbit-range" type="range" min="0" max="100" step="1" value="50" aria-label="Original appearance revealed" aria-valuetext="50% original, 50% LEGO" hidden>
+              <input id="orbit-range" type="range" min="0" max="100" step="1" value="30" aria-label="Original appearance revealed" aria-valuetext="30% original, 70% Gouache" hidden>
             </div>
             <div class="orbit-actions">
               <button type="button" class="motion" hidden>Pause motion</button>
@@ -40,7 +40,64 @@
             </div>
           </div>
         </div>
-        <figure class="reference"><a target="_blank" rel="noopener" class="media-box" href="media/kitchen-orbit-reference.jpg?v=lego"><img src="media/kitchen-orbit-reference.jpg?v=lego" loading="lazy" alt="Multicolored LEGO bricks"></a><figcaption>LEGO brick reference</figcaption></figure>
+        <div class="orbit-styles-panel">
+          <fieldset id="orbit-styles" hidden>
+            <legend>Loader style</legend>
+            <div class="orbit-choices">
+              <label>
+                <input type="radio" name="loader-style" value="gouache" data-video="media/kitchen-loader-gouache-pair.mp4" checked>
+                <span class="orbit-sample"><img src="media/kitchen-loader-gouache-pair.jpg" alt=""></span>
+                <span class="orbit-name">Gouache</span>
+              </label>
+              <label>
+                <input type="radio" name="loader-style" value="seaside" data-video="media/kitchen-loader-seaside-pair.mp4">
+                <span class="orbit-sample"><img src="media/kitchen-loader-seaside-pair.jpg" alt=""></span>
+                <span class="orbit-name">Seaside Sunrise</span>
+              </label>
+              <label>
+                <input type="radio" name="loader-style" value="scarlet" data-video="media/kitchen-loader-scarlet-pair.mp4">
+                <span class="orbit-sample"><img src="media/kitchen-loader-scarlet-pair.jpg" alt=""></span>
+                <span class="orbit-name">Scarlet Tree</span>
+              </label>
+              <label>
+                <input type="radio" name="loader-style" value="lego" data-video="media/kitchen-orbit-pair.mp4">
+                <span class="orbit-sample"><img src="media/kitchen-orbit-pair.jpg" alt=""></span>
+                <span class="orbit-name">LEGO bricks</span>
+              </label>
+            </div>
+          </fieldset>
+          <figure class="orbit-reference" data-orbit-credit="gouache">
+            <a target="_blank" rel="noopener" class="media-box" href="media/kitchen-loader-gouache-reference.jpg"><img src="media/kitchen-loader-gouache-reference.jpg" alt="Broad red, yellow and mint gouache strokes on white paper" loading="lazy"></a>
+            <figcaption>
+              <span>Style reference</span>
+              <cite>Gouache no. 6.423</cite>
+              <span><a href="https://commons.wikimedia.org/wiki/Special:Redirect/page/173026980" target="_blank" rel="noopener">Fons Heijnsbroek</a> · <a href="https://creativecommons.org/publicdomain/zero/1.0/" target="_blank" rel="license noopener">CC0</a></span>
+            </figcaption>
+          </figure>
+          <figure class="orbit-reference" data-orbit-credit="seaside" hidden>
+            <a target="_blank" rel="noopener" class="media-box" href="media/kitchen-loader-seaside-reference.jpg"><img src="media/kitchen-loader-seaside-reference.jpg" alt="Palm trees against bands of turquoise, yellow and violet at sunrise" loading="lazy"></a>
+            <figcaption>
+              <span>Style reference</span>
+              <cite>Seaside Sunrise</cite>
+              <span><a href="https://openclipart.org/detail/234135/seaside-sunrise" target="_blank" rel="noopener">Viscious-Speed</a> · <a href="https://creativecommons.org/publicdomain/zero/1.0/" target="_blank" rel="license noopener">CC0</a></span>
+            </figcaption>
+          </figure>
+          <figure class="orbit-reference" data-orbit-credit="scarlet" hidden>
+            <a target="_blank" rel="noopener" class="media-box" href="media/kitchen-loader-scarlet-reference.jpg"><img src="media/kitchen-loader-scarlet-reference.jpg" alt="A scarlet tree on a hillside beneath a peach sky" loading="lazy"></a>
+            <figcaption>
+              <span>Style reference</span>
+              <cite>Scarlet Tree</cite>
+              <span><a href="https://github.com/KDE/plasma-workspace-wallpapers/tree/master/ScarletTree" target="_blank" rel="noopener">axo1otl</a> · <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="license noopener">CC BY-SA 4.0</a></span>
+            </figcaption>
+          </figure>
+          <figure class="orbit-reference" data-orbit-credit="lego" hidden>
+            <a target="_blank" rel="noopener" class="media-box" href="media/kitchen-orbit-reference.jpg"><img src="media/kitchen-orbit-reference.jpg" alt="Multicolored LEGO bricks" loading="lazy"></a>
+            <figcaption>
+              <span>Style reference</span>
+              <span>LEGO brick reference</span>
+            </figcaption>
+          </figure>
+        </div>
       </div>
     </section>
     <section id="scenes" aria-labelledby="scenes-title">
