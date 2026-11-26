@@ -94,17 +94,13 @@ h1,h2,h3 {
 }
 
 h1 {
-  font-size: clamp(48px,7.6vw,94px);
-  letter-spacing: -.072em;
+  font-size: clamp(1.75rem,3.7vw,3.125rem);
+  letter-spacing: -.035em;
+  text-wrap: balance;
 }
 
-.subtitle {
-  font-size: clamp(17px,2.15vw,26px);
-  line-height: 1.33;
-  color: #39453a;
-  max-width: 770px;
-  margin: 15px auto 0;
-  text-wrap: balance;
+@media (min-width: 46rem) {
+  .masthead h1 span { display: block; }
 }
 
 .section-head {
