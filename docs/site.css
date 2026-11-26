@@ -414,7 +414,7 @@ figcaption,.small {
 
 .orbit-poster,
 .orbit-poster::after {
-  background: white var(--orbit-poster, url('media/kitchen-loader-gouache-pair.jpg')) left center / 200% 100% no-repeat;
+  background: white var(--orbit-poster, url('media/kitchen-loader-landing-pair.jpg')) left center / 200% 100% no-repeat;
 }
 
 .orbit-poster::after {

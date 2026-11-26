@@ -6,7 +6,7 @@
   <meta name="description" content="SemGeoSplat. Scene stylization, regional texture controls, and novel views rendered from 3D Gaussians.">
   <title>SemGeoSplat · Controllable 3D Gaussian stylization</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="site.css?v=loader-styles1">
+  <link rel="stylesheet" href="site.css?v=loader-landing1">
   <script defer src="site.js?v=loader-styles2"></script>
 </head>
 <body>
@@ -25,14 +25,14 @@
       <p class="section-description">Choose a style and drag the divider to compare it with the original. Each orbit uses the same loader from Kitchen region 2. The lower tracks are reconstructed from four upper tread links.</p>
       <div class="orbit-grid">
         <div id="orbit-mount">
-          <video id="orbit-video" src="media/kitchen-loader-gouache-pair.mp4" muted playsinline loop preload="none" aria-hidden="true"></video>
+          <video id="orbit-video" src="media/kitchen-loader-landing-pair.mp4" muted playsinline loop preload="none" aria-hidden="true"></video>
           <div id="orbit-panel">
-            <div class="orbit-stage" role="group" aria-label="Kitchen loader with its original appearance on the left and Gouache on the right">
+            <div class="orbit-stage" role="group" aria-label="Kitchen loader with its original appearance on the left and Safe Landing on the right">
               <div class="orbit-poster" aria-hidden="true"></div>
               <canvas id="orbit-canvas" width="480" height="368" aria-hidden="true"></canvas>
-              <span class="orbit-labels" aria-hidden="true"><span>Original</span><span id="orbit-style-name">Gouache</span></span>
+              <span class="orbit-labels" aria-hidden="true"><span>Original</span><span id="orbit-style-name">Safe Landing</span></span>
               <span class="orbit-divider" aria-hidden="true"><span class="orbit-handle" hidden></span></span>
-              <input id="orbit-range" type="range" min="0" max="100" step="1" value="30" aria-label="Original appearance revealed" aria-valuetext="30% original, 70% Gouache" hidden>
+              <input id="orbit-range" type="range" min="0" max="100" step="1" value="30" aria-label="Original appearance revealed" aria-valuetext="30% original, 70% Safe Landing" hidden>
             </div>
             <div class="orbit-actions">
               <button type="button" class="motion" hidden>Pause motion</button>
@@ -45,9 +45,9 @@
             <legend>Loader style</legend>
             <div class="orbit-choices">
               <label>
-                <input type="radio" name="loader-style" value="gouache" data-video="media/kitchen-loader-gouache-pair.mp4" checked>
-                <span class="orbit-sample"><img src="media/kitchen-loader-gouache-pair.jpg" alt=""></span>
-                <span class="orbit-name">Gouache</span>
+                <input type="radio" name="loader-style" value="landing" data-video="media/kitchen-loader-landing-pair.mp4" checked>
+                <span class="orbit-sample"><img src="media/kitchen-loader-landing-pair.jpg" alt=""></span>
+                <span class="orbit-name">Safe Landing</span>
               </label>
               <label>
                 <input type="radio" name="loader-style" value="seaside" data-video="media/kitchen-loader-seaside-pair.mp4">
@@ -66,12 +66,12 @@
               </label>
             </div>
           </fieldset>
-          <figure class="orbit-reference" data-orbit-credit="gouache">
-            <a target="_blank" rel="noopener" class="media-box" href="media/kitchen-loader-gouache-reference.jpg"><img src="media/kitchen-loader-gouache-reference.jpg" alt="Broad red, yellow and mint gouache strokes on white paper" loading="lazy"></a>
+          <figure class="orbit-reference" data-orbit-credit="landing">
+            <a target="_blank" rel="noopener" class="media-box" href="media/kitchen-loader-landing-reference.jpg"><img src="media/kitchen-loader-landing-reference.jpg" alt="A red rocket in a golden meadow with teal mountains and scarlet trees" loading="lazy"></a>
             <figcaption>
               <span>Style reference</span>
-              <cite>Gouache no. 6.423</cite>
-              <span><a href="https://commons.wikimedia.org/wiki/Special:Redirect/page/173026980" target="_blank" rel="noopener">Fons Heijnsbroek</a> · <a href="https://creativecommons.org/publicdomain/zero/1.0/" target="_blank" rel="license noopener">CC0</a></span>
+              <cite>Safe Landing</cite>
+              <span><a href="https://github.com/KDE/plasma-workspace-wallpapers/tree/master/SafeLanding" target="_blank" rel="noopener">Louis Durrant</a> · <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="license noopener">CC BY-SA 4.0</a></span>
             </figcaption>
           </figure>
           <figure class="orbit-reference" data-orbit-credit="seaside" hidden>
