@@ -66,6 +66,68 @@
     140: 'Pastel town scene in pink, blue and yellow',
   };
 
+  const orbitMount = document.querySelector('#orbit-mount');
+  const orbit = document.querySelector('#orbit-panel');
+  const orbitOpen = document.querySelector('#orbit-open');
+  const orbitVideo = document.querySelector('#orbit-video');
+  const slider = document.querySelector('#orbit-range');
+  const canvas = document.querySelector('#orbit-canvas');
+  const context = canvas.getContext('2d');
+
+  function drawOrbit() {
+    if (!context || orbitVideo.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+    // The paired video stores both appearances of a camera pose in a single frame.
+    const width = canvas.width;
+    const height = canvas.height;
+    const cut = Math.round(width * slider.valueAsNumber / 100);
+    if (cut > 0) context.drawImage(orbitVideo, 0, 0, cut, height, 0, 0, cut, height);
+    if (cut < width) context.drawImage(orbitVideo, width + cut, 0, width - cut, height, cut, 0, width - cut, height);
+  }
+
+  function updateSplit() {
+    const percent = slider.valueAsNumber;
+    orbit.style.setProperty('--split', percent + '%');
+    slider.setAttribute('aria-valuetext', percent + '% original, ' + (100 - percent) + '% LEGO');
+    const labels = orbit.querySelector('.orbit-labels').children;
+    labels[0].style.visibility = percent === 0 ? 'hidden' : '';
+    labels[1].style.visibility = percent === 100 ? 'hidden' : '';
+    drawOrbit();
+  }
+
+  // Present decoded frames on their own clock; use the display clock on older engines.
+  const hasVideoClock = typeof orbitVideo.requestVideoFrameCallback === 'function';
+  let pendingFrame = null;
+  function paintOrbit() {
+    pendingFrame = null;
+    drawOrbit();
+    if (!orbitVideo.paused && !orbitVideo.ended) {
+      pendingFrame = hasVideoClock ? orbitVideo.requestVideoFrameCallback(paintOrbit) : requestAnimationFrame(paintOrbit);
+    }
+  }
+  orbitVideo.addEventListener('playing', () => {
+    if (pendingFrame === null) paintOrbit();
+  });
+  orbitVideo.addEventListener('pause', () => {
+    if (pendingFrame === null) return;
+    if (hasVideoClock) orbitVideo.cancelVideoFrameCallback(pendingFrame);
+    else cancelAnimationFrame(pendingFrame);
+    pendingFrame = null;
+    drawOrbit();
+  });
+  orbitVideo.addEventListener('loadeddata', drawOrbit);
+  slider.hidden = false;
+  orbit.querySelector('.orbit-handle').hidden = false;
+  slider.addEventListener('input', updateSplit);
+
+  function updateOrbitMotion() {
+    const shown = preview?.open ? preview.contains(orbit) : visible.has(orbitMount);
+    if (!context || !motion || !shown || document.hidden) {
+      orbitVideo.pause();
+    } else if (orbitVideo.paused) {
+      orbitVideo.play().catch(() => {});
+    }
+  }
+
   function clearSource(video) {
     const previous = sources.get(video);
     if (!previous) return;
@@ -122,6 +184,7 @@
       if (clip.getAttribute('src') !== source) clip.setAttribute('src', source);
     }
     for (const toggle of toggles) toggle.textContent = motion ? 'Pause motion' : 'Play motion';
+    updateOrbitMotion();
     updateVideos();
   }
 
@@ -210,14 +273,14 @@
   function enablePreview() {
     if (!preview || typeof preview.showModal !== 'function') return;
 
-    const links = [...document.querySelectorAll('main a.media-box, .control-meta a, #original-link, #styled-link')];
+    orbitOpen.hidden = false;
+    const links = [...document.querySelectorAll('#orbit-open, main a.media-box, .control-meta a, #original-link, #styled-link')];
     const title = preview.querySelector('#preview-title');
     const content = preview.querySelector('.preview-content');
     let opener = null;
     let openingScroll = null;
 
-    function show(link) {
-      if (preview.open) return;
+    function previewMedia(link) {
       const isVideo = new URL(link.href).pathname.endsWith('.mp4');
       const figureVideo = link.closest('figure')?.querySelector('video');
       const image = link.querySelector('img') || link.closest('article')?.querySelector('.media-box img');
@@ -240,9 +303,20 @@
         media.src = link.href;
       }
 
+      return media;
+    }
+
+    function show(link) {
+      if (preview.open) return;
       opener = link;
       openingScroll = history.state?.semgeoScroll || [window.scrollX, window.scrollY];
-      content.replaceChildren(media);
+      if (link === orbitOpen) {
+        title.textContent = 'Kitchen loader comparison';
+        orbitMount.style.height = orbitMount.offsetHeight + 'px';
+        content.replaceChildren(orbit);
+      } else {
+        content.replaceChildren(previewMedia(link));
+      }
       preview.showModal();
       updateMotion();
     }
@@ -250,7 +324,10 @@
     function hide() {
       if (!preview.open) return;
       const media = content.firstElementChild;
-      if (media instanceof HTMLVideoElement) {
+      if (media === orbit) {
+        orbitMount.append(orbit);
+        orbitMount.style.height = '';
+      } else if (media instanceof HTMLVideoElement) {
         media.pause();
         clearSource(media);
         media.removeAttribute('src');
@@ -335,9 +412,9 @@
       }
       updateMotion();
     });
-    [...clips, comparison].forEach(element => observer.observe(element));
+    [...clips, comparison, orbitMount].forEach(element => observer.observe(element));
   } else {
-    [...clips, comparison].forEach(element => visible.add(element));
+    [...clips, comparison, orbitMount].forEach(element => visible.add(element));
   }
   preference.addEventListener('change', event => {
     motion = !event.matches;
