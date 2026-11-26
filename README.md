@@ -89,15 +89,16 @@ Use the exact reference file that produced `style_primitives.pt`. To make `outsi
 
 ## Isolate the Kitchen loader
 
-The Kitchen example uses a [calibrated 3D crop](configs/kitchen-loader.json), including the tabletop plane and the contacts of the tracks. The renderer selects the object once from the original Gaussian model and orbits it on white. The following command also exports a standalone object PLY.
+The website uses region 2 of the refined Kitchen partition. We estimate the tabletop from nearby Gaussians assigned to other regions, remove splats in the support layer and keep the main connected component. This leaves 72,481 of the 76,183 Gaussians in region 2. The original and LEGO-styled orbits use the same point indices and camera path.
 
 ```bash
 python -m scripts.render_object_orbit \
-  --source "$REFINE/point_cloud.ply" --recipe configs/kitchen-loader.json \
-  --output output/kitchen-loader.gif --export-ply output/kitchen-loader.ply
+  --source "$REFINE/point_cloud.ply" --regions /path/to/kitchen/regions.pt --region 2 \
+  --recipe configs/kitchen-loader.json --output output/kitchen-loader.gif \
+  --export-ply output/kitchen-loader.ply
 ```
 
-Use a refined Kitchen reconstruction in the preset’s coordinate system. Add `--appearance /path/to/stylized/point_cloud.ply` to replay the same 72 views with a registered appearance. The script verifies positions, rotations, scales and opacities before applying the selection. The website pairs the original loader with the appearance fitted to the complete LEGO brick image (reference 133). The Kitchen scene was stylized before extracting the same object from both models. A reconstruction in a different coordinate frame requires its own crop.
+Add `--appearance /path/to/kitchen-style-133/point_cloud.ply` and choose new output paths to render the appearance fitted to the full LEGO brick reference. Use the region sidecar for the reconstruction on which you selected the loader. Numbering can differ between partitions, including the older style-133 training partition. The script checks the ordered geometry and uses the recipe to position the orbit camera. Omitting `--regions` and `--region` selects the earlier manually calibrated crop.
 
 ## Project page and attribution
 

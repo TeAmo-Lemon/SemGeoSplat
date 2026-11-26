@@ -6,8 +6,8 @@
   <meta name="description" content="SemGeoSplat. Scene stylization, regional texture controls, and novel views rendered from 3D Gaussians.">
   <title>SemGeoSplat · Controllable 3D Gaussian stylization</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="site.css?v=gallery2">
-  <script defer src="site.js?v=gallery3"></script>
+  <link rel="stylesheet" href="site.css?v=media-viewer1">
+  <script defer src="site.js?v=media-viewer1"></script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to results</a>
@@ -22,11 +22,11 @@
     </div>
     <section id="orbit" aria-labelledby="orbit-title">
       <div class="section-head"><h2 id="orbit-title">Kitchen · LEGO brick stylization</h2><button type="button" class="motion" hidden>Pause motion</button></div>
-      <p class="section-description">The same loader turns through 360° in both views. Reference 133 transfers the colors and stud pattern of LEGO bricks onto the bucket, cab and tracks.</p>
+      <p class="section-description">Both views use the same 72,481 Gaussians from Kitchen region 2 after removing tabletop points. The right-hand view shows the loader with the colors and stud pattern of reference 133.</p>
       <div class="scene-grid orbit-grid">
-        <figure><a class="media-box" href="media/kitchen-orbit.gif" aria-label="Open animation: The yellow toy loader rotating on white"><img src="media/kitchen-orbit.jpg" data-poster="media/kitchen-orbit.jpg" data-animation="media/kitchen-orbit.gif" loading="lazy" decoding="async" alt="The yellow toy loader rotating on white"></a><figcaption>Original loader</figcaption></figure>
-        <figure class="reference"><a class="media-box" href="media/kitchen-orbit-reference.jpg?ref=133"><img src="media/kitchen-orbit-reference.jpg?ref=133" loading="lazy" alt="Reference 133, a close-up of multicolored LEGO bricks"></a><figcaption>LEGO bricks · Reference 133</figcaption></figure>
-        <figure><a class="media-box" href="media/kitchen-orbit-stylized.gif?ref=133" aria-label="Open animation: The toy loader with colorful LEGO brick texture rotating on white"><img src="media/kitchen-orbit-stylized.jpg?ref=133" data-poster="media/kitchen-orbit-stylized.jpg?ref=133" data-animation="media/kitchen-orbit-stylized.gif?ref=133" loading="lazy" decoding="async" alt="The toy loader with colorful LEGO brick texture rotating on white"></a><figcaption>Stylized loader</figcaption></figure>
+        <figure><a target="_blank" rel="noopener" class="media-box" href="media/kitchen-orbit.gif?v=r2-clean" aria-label="Open animation: The yellow toy loader rotating on white"><img src="media/kitchen-orbit.jpg?v=r2-clean" data-poster="media/kitchen-orbit.jpg?v=r2-clean" data-animation="media/kitchen-orbit.gif?v=r2-clean" loading="lazy" decoding="async" alt="The yellow toy loader rotating on white"></a><figcaption>Original loader</figcaption></figure>
+        <figure class="reference"><a target="_blank" rel="noopener" class="media-box" href="media/kitchen-orbit-reference.jpg?ref=133"><img src="media/kitchen-orbit-reference.jpg?ref=133" loading="lazy" alt="Reference 133, a close-up of multicolored LEGO bricks"></a><figcaption>LEGO bricks · Reference 133</figcaption></figure>
+        <figure><a target="_blank" rel="noopener" class="media-box" href="media/kitchen-orbit-stylized.gif?v=r2-clean" aria-label="Open animation: The toy loader with colorful LEGO brick texture rotating on white"><img src="media/kitchen-orbit-stylized.jpg?v=r2-clean" data-poster="media/kitchen-orbit-stylized.jpg?v=r2-clean" data-animation="media/kitchen-orbit-stylized.gif?v=r2-clean" loading="lazy" decoding="async" alt="The toy loader with colorful LEGO brick texture rotating on white"></a><figcaption>Stylized loader</figcaption></figure>
       </div>
     </section>
     <section id="scenes" aria-labelledby="scenes-title">
@@ -52,15 +52,15 @@
       <div id="comparison" class="scene-grid">
         <figure>
           <video class="scene-video" id="original-video" poster="media/gallery/orchids/original.jpg" src="https://raw.githubusercontent.com/TeAmo-Lemon/SemGeoSplat/9c50d278e4641bb691e9c90503314c7447c1ef64/docs/media/gallery/orchids/original.mp4" muted loop playsinline controls preload="none" aria-label="Original Orchids scene"></video>
-          <figcaption>Original scene <a id="original-link" href="https://raw.githubusercontent.com/TeAmo-Lemon/SemGeoSplat/9c50d278e4641bb691e9c90503314c7447c1ef64/docs/media/gallery/orchids/original.mp4">Open clip</a></figcaption>
+          <figcaption>Original scene <a target="_blank" rel="noopener" id="original-link" href="https://raw.githubusercontent.com/TeAmo-Lemon/SemGeoSplat/9c50d278e4641bb691e9c90503314c7447c1ef64/docs/media/gallery/orchids/original.mp4">Open clip</a></figcaption>
         </figure>
         <figure class="reference">
-          <a class="media-box" id="reference-link" href="media/gallery/styles/3.jpg"><img id="reference-image" src="media/gallery/styles/3.jpg" alt="Style reference 3"></a>
+          <a target="_blank" rel="noopener" class="media-box" id="reference-link" href="media/gallery/styles/3.jpg"><img id="reference-image" src="media/gallery/styles/3.jpg" alt="Style reference 3"></a>
           <figcaption id="reference-label">Reference 3</figcaption>
         </figure>
         <figure>
           <video class="scene-video" id="styled-video" poster="media/gallery/orchids/3.jpg" src="https://raw.githubusercontent.com/TeAmo-Lemon/SemGeoSplat/9c50d278e4641bb691e9c90503314c7447c1ef64/docs/media/gallery/orchids/3.mp4" muted loop playsinline controls preload="none" aria-label="Orchids rendered with reference 3"></video>
-          <figcaption>Stylized scene <a id="styled-link" href="https://raw.githubusercontent.com/TeAmo-Lemon/SemGeoSplat/9c50d278e4641bb691e9c90503314c7447c1ef64/docs/media/gallery/orchids/3.mp4">Open clip</a></figcaption>
+          <figcaption>Stylized scene <a target="_blank" rel="noopener" id="styled-link" href="https://raw.githubusercontent.com/TeAmo-Lemon/SemGeoSplat/9c50d278e4641bb691e9c90503314c7447c1ef64/docs/media/gallery/orchids/3.mp4">Open clip</a></figcaption>
         </figure>
       </div>
       <fieldset class="style-picker" hidden>
@@ -74,44 +74,51 @@
       <p class="section-description">Choose which 3D region receives a texture, how much of the reference to use, and where on the surface it appears.</p>
       <div class="control-grid">
         <article class="control control-lead">
-          <a class="media-box" href="media/kitchen-control.gif" aria-label="Open animation: Kitchen — Select a region"><img src="media/kitchen-control.jpg" data-poster="media/kitchen-control.jpg" data-animation="media/kitchen-control.gif" loading="lazy" decoding="async" alt="Kitchen — Select a region"></a>
+          <a target="_blank" rel="noopener" class="media-box" href="media/kitchen-control.gif" aria-label="Open animation: Kitchen — Select a region"><img src="media/kitchen-control.jpg" data-poster="media/kitchen-control.jpg" data-animation="media/kitchen-control.gif" loading="lazy" decoding="async" alt="Kitchen — Select a region"></a>
           <div class="control-copy">
             <h3>Select a region</h3><p>Apply the same reference to the toy loader, the placemats, or both. Watch the surface of the bucket as the selection switches.</p>
-            <div class="control-meta"><a href="media/kitchen-control-reference.jpg"><img loading="lazy" src="media/kitchen-control-reference.jpg" alt="Open Kitchen style reference 135"></a><span>Kitchen · Reference 135</span><a href="media/kitchen-control.gif">Open GIF</a></div>
-            <p class="credit">Claude Monet, <i>The Magpie</i> (1868–69), Musée d’Orsay. <a href="https://commons.wikimedia.org/wiki/File:Claude_Monet_-_The_Magpie_-_Google_Art_Project.jpg">Image source</a></p>
+            <div class="control-meta"><a target="_blank" rel="noopener" href="media/kitchen-control-reference.jpg"><img loading="lazy" src="media/kitchen-control-reference.jpg" alt="Open Kitchen style reference 135"></a><span>Kitchen · Reference 135</span><a target="_blank" rel="noopener" href="media/kitchen-control.gif">Open GIF</a></div>
+            <p class="credit">Claude Monet, <i>The Magpie</i> (1868–69), Musée d’Orsay. <a target="_blank" rel="noopener" href="https://commons.wikimedia.org/wiki/File:Claude_Monet_-_The_Magpie_-_Google_Art_Project.jpg">Image source</a></p>
           </div>
         </article>
         <article class="control">
-          <a class="media-box" href="media/bonsai-control.gif" aria-label="Open animation: Bonsai — Move the 3D anchor"><img src="media/bonsai-control.jpg" data-poster="media/bonsai-control.jpg" data-animation="media/bonsai-control.gif" loading="lazy" decoding="async" alt="Bonsai — Move the 3D anchor"></a>
+          <a target="_blank" rel="noopener" class="media-box" href="media/bonsai-control.gif" aria-label="Open animation: Bonsai — Move the 3D anchor"><img src="media/bonsai-control.jpg" data-poster="media/bonsai-control.jpg" data-animation="media/bonsai-control.gif" loading="lazy" decoding="async" alt="Bonsai — Move the 3D anchor"></a>
           <div class="control-copy">
             <h3>Move the 3D anchor</h3><p>The ring marks the projection of a point on the bonsai. At each of three anchor positions, the selected patch supplies 50% of the transport mass. Watch how its texture shifts across the canopy.</p>
-            <div class="control-meta"><a href="media/bonsai-control-reference.jpg"><img loading="lazy" src="media/bonsai-control-reference.jpg" alt="Open Bonsai style reference 64"></a><span>Bonsai · Reference 64</span><a href="media/bonsai-control.gif">Open GIF</a></div>
+            <div class="control-meta"><a target="_blank" rel="noopener" href="media/bonsai-control-reference.jpg"><img loading="lazy" src="media/bonsai-control-reference.jpg" alt="Open Bonsai style reference 64"></a><span>Bonsai · Reference 64</span><a target="_blank" rel="noopener" href="media/bonsai-control.gif">Open GIF</a></div>
           </div>
         </article>
         <article class="control">
-          <a class="media-box" href="media/flower-control.gif" aria-label="Open animation: Flower — Shift texture around an anchor"><img src="media/flower-control.jpg" data-poster="media/flower-control.jpg" data-animation="media/flower-control.gif" loading="lazy" decoding="async" alt="Flower — Shift texture around an anchor"></a>
+          <a target="_blank" rel="noopener" class="media-box" href="media/flower-control.gif" aria-label="Open animation: Flower — Shift texture around an anchor"><img src="media/flower-control.jpg" data-poster="media/flower-control.jpg" data-animation="media/flower-control.gif" loading="lazy" decoding="async" alt="Flower — Shift texture around an anchor"></a>
           <div class="control-copy">
             <h3>Shift texture around an anchor</h3><p>Half of the transport mass comes from the selected reference patch. Nine bias settings redistribute it along the flower surface while the anchor stays fixed.</p>
-            <div class="control-meta"><a href="media/flower-control-reference.jpg"><img loading="lazy" src="media/flower-control-reference.jpg" alt="Open Flower style reference 77"></a><span>Flower · Reference 77</span><a href="media/flower-control.gif">Open GIF</a></div>
+            <div class="control-meta"><a target="_blank" rel="noopener" href="media/flower-control-reference.jpg"><img loading="lazy" src="media/flower-control-reference.jpg" alt="Open Flower style reference 77"></a><span>Flower · Reference 77</span><a target="_blank" rel="noopener" href="media/flower-control.gif">Open GIF</a></div>
           </div>
         </article>
         <article class="control">
-          <a class="media-box" href="media/garden-control.gif" aria-label="Open animation: Garden — Adjust local strength"><img src="media/garden-control.jpg" data-poster="media/garden-control.jpg" data-animation="media/garden-control.gif" loading="lazy" decoding="async" alt="Garden — Adjust local strength"></a>
+          <a target="_blank" rel="noopener" class="media-box" href="media/garden-control.gif" aria-label="Open animation: Garden — Adjust local strength"><img src="media/garden-control.jpg" data-poster="media/garden-control.jpg" data-animation="media/garden-control.gif" loading="lazy" decoding="async" alt="Garden — Adjust local strength"></a>
           <div class="control-copy">
             <h3>Adjust local strength</h3><p>Follow the radial pattern on the tabletop as its stylized appearance strength changes from 0% to 50% to 100%.</p>
-            <div class="control-meta"><a href="media/garden-control-reference.jpg"><img loading="lazy" src="media/garden-control-reference.jpg" alt="Open Garden style reference 68"></a><span>Garden · Reference 68</span><a href="media/garden-control.gif">Open GIF</a></div>
+            <div class="control-meta"><a target="_blank" rel="noopener" href="media/garden-control-reference.jpg"><img loading="lazy" src="media/garden-control-reference.jpg" alt="Open Garden style reference 68"></a><span>Garden · Reference 68</span><a target="_blank" rel="noopener" href="media/garden-control.gif">Open GIF</a></div>
           </div>
         </article>
         <article class="control">
-          <a class="media-box" href="media/horns-control.gif" aria-label="Open animation: Horns — Set the texture share"><img src="media/horns-control.jpg" data-poster="media/horns-control.jpg" data-animation="media/horns-control.gif" loading="lazy" decoding="async" alt="Horns — Set the texture share"></a>
+          <a target="_blank" rel="noopener" class="media-box" href="media/horns-control.gif" aria-label="Open animation: Horns — Set the texture share"><img src="media/horns-control.jpg" data-poster="media/horns-control.jpg" data-animation="media/horns-control.gif" loading="lazy" decoding="async" alt="Horns — Set the texture share"></a>
           <div class="control-copy">
             <h3>Set the texture share</h3><p>The selected reference patch supplies 20%, 50%, then 80% of the transport mass for the edited region. Compare the markings below the horns.</p>
-            <div class="control-meta"><a href="media/horns-control-reference.jpg"><img loading="lazy" src="media/horns-control-reference.jpg" alt="Open Horns style reference 107"></a><span>Horns · Reference 107</span><a href="media/horns-control.gif">Open GIF</a></div>
+            <div class="control-meta"><a target="_blank" rel="noopener" href="media/horns-control-reference.jpg"><img loading="lazy" src="media/horns-control-reference.jpg" alt="Open Horns style reference 107"></a><span>Horns · Reference 107</span><a target="_blank" rel="noopener" href="media/horns-control.gif">Open GIF</a></div>
           </div>
         </article>
       </div>
     </section>
   </main>
   <footer><div class="wrap"><span>SemGeoSplat</span><a href="https://github.com/TeAmo-Lemon/SemGeoSplat">Source code</a></div></footer>
+  <dialog id="media-preview" aria-labelledby="preview-title">
+    <header class="preview-bar">
+      <h2 id="preview-title">Media preview</h2>
+      <button type="button" class="preview-close" autofocus>Close</button>
+    </header>
+    <div class="preview-content"></div>
+  </dialog>
 </body>
 </html>

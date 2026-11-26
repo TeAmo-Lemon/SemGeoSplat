@@ -493,3 +493,53 @@ footer .wrap {
   outline: 3px dashed var(--ink);
   outline-offset: 2px;
 }
+
+html:has(#media-preview[open]) {
+  overflow: hidden;
+}
+
+#media-preview {
+  width: min(92vw, 68rem);
+  max-height: 92vh;
+  max-height: 92dvh;
+  border: 0;
+  padding: 0;
+  color: var(--ink);
+  background: var(--paper);
+  border-radius: 5px;
+  box-shadow: 0 10px 60px rgb(0 0 0 / 24%);
+}
+
+#media-preview::backdrop {
+  background: rgb(15 21 17 / 72%);
+}
+
+.preview-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+}
+
+#preview-title {
+  font: 500 1rem/1.3 'Source Sans 3', Arial, sans-serif;
+  letter-spacing: normal;
+}
+
+.preview-close {
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 4px 16px;
+  background: white;
+}
+
+.preview-content > img,
+.preview-content > video {
+  display: block;
+  width: 100%;
+  max-height: calc(92vh - 6rem);
+  max-height: calc(92dvh - 6rem);
+  object-fit: contain;
+}

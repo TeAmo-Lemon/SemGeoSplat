@@ -12,10 +12,12 @@ import torch
 from PIL import Image
 from plyfile import PlyData, PlyElement
 from scipy import ndimage
+from scipy.spatial import cKDTree
 
 from gaussian_renderer import GaussianModel, render
 from scene.cameras import MiniCam
 from semgeo_utils.graphics_utils import getProjectionMatrix
+from semgeo_utils.appearance_mix import regions_xyz_fingerprint, xyz_fingerprint
 
 
 def box_mask(across, along, height, box):
@@ -53,15 +55,94 @@ def select_vertices(vertices, recipe):
     candidates = np.flatnonzero(mask & (scales.max(axis=1) < recipe['max_scale']))
     if not candidates.size:
         raise ValueError('No Gaussians intersect the object crop')
-    positions = local[candidates]
-    grid = np.floor((positions - positions.min(axis=0)) / recipe['voxel_size']).astype(int) + 1
-    occupied = np.zeros(grid.max(axis=0) + 2, dtype=bool)
+    return largest_component(candidates, local[candidates], recipe['voxel_size'])
+
+
+def largest_component(indices, positions, voxel_size):
+    grid = np.floor((positions - positions.min(axis=0)) / voxel_size).astype(int) + 1
+    shape = tuple(int(size) + 2 for size in grid.max(axis=0))
+    occupied = np.zeros(shape, dtype=bool)
     occupied[tuple(grid.T)] = True
     labels, _ = ndimage.label(
         ndimage.binary_dilation(occupied), structure=np.ones((3, 3, 3), dtype=bool)
     )
     point_labels = labels[tuple(grid.T)]
-    return candidates[point_labels == np.bincount(point_labels).argmax()]
+    return indices[point_labels == np.bincount(point_labels).argmax()]
+
+
+def support_heights(background, foreground, tolerance):
+    """Signed heights above the dominant plane fitted to nearby background centers."""
+    rng = np.random.default_rng(0)
+    sample = background[rng.choice(len(background), min(14000, len(background)), replace=False)]
+    best = 0
+    for _ in range(11):
+        triples = rng.integers(len(sample), size=(48, 3))
+        p, q, r = sample[triples].transpose(1, 0, 2)
+        normals = np.cross(q - p, r - p)
+        lengths = np.linalg.norm(normals, axis=1)
+        valid = lengths > 1e-9
+        if not valid.any():
+            continue
+        normals = normals[valid] / lengths[valid, None]
+        offsets = (p[valid] * normals).sum(axis=1)
+        counts = (np.abs(sample @ normals.T - offsets) < tolerance).sum(axis=0)
+        winner = np.argmax(counts)
+        if counts[winner] > best:
+            normal, offset, best = normals[winner], offsets[winner], counts[winner]
+    if best < 3:
+        raise ValueError('The background points do not identify a support plane')
+    for _ in range(4):
+        inliers = background[np.abs(background @ normal - offset) < tolerance]
+        if len(inliers) < 3:
+            raise ValueError('The background has insufficient planar support')
+        centered = inliers - np.median(inliers, axis=0)
+        normal = np.linalg.eigh(centered.T @ centered)[1][:, 0]
+        offset = np.median(inliers @ normal)
+    heights = foreground @ normal - offset
+    background_heights = background @ normal - offset
+    if np.median(heights) < 0:
+        heights = -heights
+        background_heights = -background_heights
+    slab = background_heights[np.abs(background_heights) < 2.5 * tolerance]
+    return heights, np.quantile(slab, 0.97)
+
+
+def select_supported_region(vertices, cache_path, region):
+    """Keep the connected foreground above the support of a saved 3D region."""
+    cache = torch.load(cache_path, map_location='cpu', weights_only=True)
+    labels = np.asarray(cache['cluster_labels'])
+    if labels.shape != (len(vertices),) or regions_xyz_fingerprint(cache, cache_path) != xyz_fingerprint(vertices):
+        raise ValueError('The saved region labels must match the ordered source Gaussians')
+    if region < 0 or region >= cache['num_regions']:
+        raise ValueError('Choose a region ID from the saved source partition')
+    ids = np.flatnonzero(labels == region)
+    if len(ids) < 3:
+        raise ValueError('The selected region has too few Gaussians')
+
+    xyz = np.column_stack([vertices[key] for key in ('x', 'y', 'z')])
+    foreground = xyz[ids]
+    center = np.median(foreground, axis=0)
+    radius = np.quantile(np.linalg.norm(foreground - center, axis=1), 0.90)
+    nearby = (labels >= 0) & (labels != region) & (np.linalg.norm(xyz - center, axis=1) < 1.65 * radius)
+    background = xyz[nearby]
+    distances = cKDTree(foreground).query(background, k=1)[0]
+    background = background[distances < 0.5 * radius]
+    if len(background) < 3:
+        raise ValueError('No neighboring labeled region supplies a support surface')
+    tolerance = 0.016 * radius
+    heights, top = support_heights(background, foreground, tolerance)
+    scales = np.maximum.reduce([np.exp(vertices[f'scale_{i}'][ids]) for i in range(3)])
+    core_scales = scales[heights > 3 * tolerance]
+    if not len(core_scales):
+        raise ValueError('The selected region does not extend above its support')
+    keep = (heights > top) & (scales < np.quantile(core_scales, 0.997))
+    kept_positions = foreground[keep]
+    if len(kept_positions) < 2:
+        raise ValueError('Too few points remain above the support surface')
+    spacing = np.median(cKDTree(kept_positions).query(kept_positions[::5], k=2)[0][:, 1])
+    if not np.isfinite(spacing) or spacing <= 0:
+        raise ValueError('Cannot estimate the spacing between foreground Gaussians')
+    return largest_component(ids[keep], kept_positions, 3 * spacing)
 
 
 def orbit_view(azimuth, recipe, width, height):
@@ -126,6 +207,8 @@ def main():
     parser.add_argument('--source', type=Path, required=True, help='Original Gaussian PLY')
     parser.add_argument('--appearance', type=Path, help='Stylized PLY on the same geometry')
     parser.add_argument('--recipe', type=Path, required=True)
+    parser.add_argument('--regions', type=Path, help='Saved region partition for a foreground object on a planar support')
+    parser.add_argument('--region', type=int, help='Region to isolate and clean using neighboring background geometry')
     parser.add_argument('--output', type=Path, required=True, help='Destination GIF')
     parser.add_argument('--export-ply', type=Path, help='Save the isolated Gaussian model')
     parser.add_argument('--frames', type=int, default=72)
@@ -135,13 +218,18 @@ def main():
     args = parser.parse_args()
     if min(args.frames, args.fps, args.width, args.height) < 1 or args.fps > 100:
         parser.error('Frame count and dimensions must be positive, and FPS must be in [1, 100]')
-    inputs = {path.resolve() for path in (args.source, args.appearance, args.recipe) if path}
+    if (args.region is None) != (args.regions is None):
+        parser.error('--regions and --region must be provided together')
+    inputs = {path.resolve() for path in (args.source, args.appearance, args.recipe, args.regions) if path}
+    if args.regions is not None:
+        inputs.add(args.regions.with_name('point_cloud.ply').resolve())
     outputs = [path.resolve() for path in (args.output, args.export_ply) if path]
     if inputs.intersection(outputs) or len(set(outputs)) != len(outputs):
         parser.error('Use a different path for each output and each input')
     recipe = json.loads(args.recipe.read_text())
     original = PlyData.read(args.source, mmap='r')['vertex'].data
-    chosen = select_vertices(original, recipe)
+    chosen = (select_vertices(original, recipe) if args.regions is None
+              else select_supported_region(original, args.regions, args.region))
     vertices = original
     if args.appearance:
         vertices = PlyData.read(args.appearance, mmap='r')['vertex'].data

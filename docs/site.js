@@ -6,6 +6,7 @@
   const styled = document.querySelector('#styled-video');
   const videos = [original, styled];
   const comparison = document.querySelector('#comparison');
+  const preview = document.querySelector('#media-preview');
   const clips = [...document.querySelectorAll('img[data-animation]')];
   const toggles = [...document.querySelectorAll('.motion')];
   const preference = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -46,7 +47,7 @@
 
 
   function updateVideos() {
-    if (!motion || !visible.has(comparison) || document.hidden) {
+    if (!motion || preview?.open || !visible.has(comparison) || document.hidden) {
       videos.forEach(video => video.pause());
       return;
     }
@@ -68,7 +69,7 @@
 
   function updateMotion() {
     for (const clip of clips) {
-      const animate = motion && visible.has(clip) && !document.hidden;
+      const animate = motion && !preview?.open && visible.has(clip) && !document.hidden;
       const source = animate ? clip.dataset.animation : clip.dataset.poster;
       if (clip.getAttribute('src') !== source) clip.setAttribute('src', source);
     }
@@ -157,6 +158,105 @@
     showStyle(selected, updateUrl);
   }
 
+  function enablePreview() {
+    if (!preview || typeof preview.showModal !== 'function') return;
+
+    const links = [...document.querySelectorAll('main a.media-box, .control-meta a, #original-link, #styled-link')];
+    const title = preview.querySelector('#preview-title');
+    const content = preview.querySelector('.preview-content');
+    let opener = null;
+
+    function show(link) {
+      if (preview.open) return;
+      const isVideo = new URL(link.href).pathname.endsWith('.mp4');
+      const figureVideo = link.closest('figure')?.querySelector('video');
+      const image = link.querySelector('img') || link.closest('article')?.querySelector('.media-box img');
+      title.textContent = image?.alt || figureVideo?.getAttribute('aria-label') || 'Media preview';
+
+      const media = document.createElement(isVideo ? 'video' : 'img');
+      if (isVideo) {
+        media.controls = true;
+        media.loop = true;
+        media.autoplay = motion;
+        media.playsInline = true;
+        media.muted = true;
+        media.setAttribute('aria-labelledby', title.id);
+        media.poster = figureVideo.poster;
+        sources.set(media, {url: link.href, controller: null, blobUrl: null});
+        media.addEventListener('error', () => retryWithVideoMime(media));
+        media.src = sources.get(figureVideo)?.blobUrl || link.href;
+      } else {
+        media.alt = title.textContent;
+        media.src = link.href;
+      }
+
+      opener = link;
+      content.replaceChildren(media);
+      preview.showModal();
+      updateMotion();
+    }
+
+    function hide() {
+      if (!preview.open) return;
+      const media = content.firstElementChild;
+      if (media instanceof HTMLVideoElement) {
+        media.pause();
+        clearSource(media);
+        media.removeAttribute('src');
+        media.load();
+      }
+      content.replaceChildren();
+      preview.close();
+      opener?.focus({preventScroll: true});
+      opener = null;
+      updateMotion();
+    }
+
+    let returning = false;
+    function closePreview() {
+      if (returning) return;
+      if (Number.isInteger(history.state?.semgeoMedia)) {
+        returning = true;
+        history.back();
+      } else {
+        hide();
+      }
+    }
+
+    function restorePreview() {
+      returning = false;
+      const index = history.state?.semgeoMedia;
+      if (Number.isInteger(index) && links[index]) show(links[index]);
+      else hide();
+    }
+
+    links.forEach((link, index) => {
+      link.setAttribute('aria-haspopup', 'dialog');
+      link.addEventListener('click', event => {
+        if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        if (preview.open) return;
+        // A same-URL entry makes browser Back dismiss the modal and Forward reopen it.
+        try {
+          history.pushState({...history.state, semgeoMedia: index}, '');
+        } catch {
+          // Some file viewers disable history operations. The Close button still works.
+        }
+        show(link);
+      });
+    });
+    preview.querySelector('.preview-close').addEventListener('click', closePreview);
+    preview.addEventListener('cancel', event => {
+      event.preventDefault();
+      closePreview();
+    });
+    preview.addEventListener('click', event => {
+      if (event.target === preview) closePreview();
+    });
+    window.addEventListener('popstate', restorePreview);
+    restorePreview();
+  }
+
   picker.addEventListener('change', event => showStyle(event.target.value, true));
   select.addEventListener('change', () => chooseScene(null, true));
   for (const toggle of toggles) {
@@ -192,5 +292,6 @@
   chooseScene(query.get('style'), false);
   document.querySelector('.scene-picker').hidden = false;
   document.querySelector('.style-picker').hidden = false;
+  enablePreview();
   updateMotion();
 })();
